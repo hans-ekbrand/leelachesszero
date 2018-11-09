@@ -35,6 +35,7 @@
 #include <iterator>
 #include <sstream>
 #include <thread>
+#include <cstdlib>
 
 #include "mcts/node.h"
 #include "neural/cache.h"
@@ -616,6 +617,8 @@ void SearchWorker::GatherMinibatch() {
   // Number of nodes processed out of order.
   int number_out_of_order = 0;
 
+  Node* current_node = search_->root_node_;
+
   // Gather nodes to process in the current batch.
   // If we had too many (kMiniBatchSize) nodes out of order, also interrupt the
   // iteration so that search can exit.
@@ -626,7 +629,9 @@ void SearchWorker::GatherMinibatch() {
     // If there's something to process without touching slow neural net, do it.
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
     // Pick next node to extend.
-    minibatch_.emplace_back(PickNodeToExtend(collisions_left));
+    SearchWorker::NodeToProcess node_to_extend = PickNodeToExtend(collisions_left, current_node);
+    current_node = node_to_extend.node;
+    minibatch_.emplace_back(node_to_extend);
     auto& picked_node = minibatch_.back();
     auto* node = picked_node.node;
 
@@ -688,12 +693,22 @@ void IncrementNInFlight(Node* node, Node* root, int amount) {
 
 // Returns node and whether there's been a search collision on the node.
 SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
-    int collision_limit) {
+    int collision_limit,
+    Node* start_node) {
   // Starting from search_->root_node_, generate a playout, choosing a
   // node at each level according to the MCTS formula. n_in_flight_ is
   // incremented for each node in the playout (via TryStartScoreUpdate()).
 
-  Node* node = search_->root_node_;
+
+  Node* node = start_node;
+  while (true) {
+    if (node->GetParent() == NULL) break;
+    node = node->GetParent();
+    if (rand() % 100 < 50) break;
+  }
+
+//  Node* node = search_->root_node_;
+
   Node::Iterator best_edge;
   Node::Iterator second_best_edge;
   // Initialize position sequence with pre-move position.
@@ -705,7 +720,9 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
   int best_node_n = search_->best_move_edge_.GetN();
 
   // True on first iteration, false as we dive deeper.
-  bool is_root_node = true;
+//  bool is_root_node = true;
+  bool is_root_node = node->GetParent() == NULL;
+  bool is_first_iteration = true;
   uint16_t depth = 0;
 
   while (true) {
@@ -716,7 +733,7 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
     //            in the beginning (and there would be no need for "if
     //            (!is_root_node)"), but that would mean extra mutex lock.
     //            Will revisit that after rethinking locking strategy.
-    if (!is_root_node) node = best_edge.GetOrSpawnNode(/* parent */ node);
+    if (!is_first_iteration) node = best_edge.GetOrSpawnNode(/* parent */ node);
     best_edge.Reset();
     depth++;
     // n_in_flight_ is incremented. If the method returns false, then there is
@@ -799,6 +816,7 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
       search_->found_best_move_ = true;
     }
     is_root_node = false;
+    is_first_iteration = false;
   }
 }
 
