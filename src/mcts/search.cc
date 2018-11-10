@@ -684,8 +684,11 @@ namespace {
 void IncrementNInFlight(Node* node, Node* root, int amount) {
   if (amount == 0) return;
   while (true) {
-    node->IncrementNInFlight(amount);
+    // We call IncrementNInFlight with node==root which is insane. I temporarily worked around that
+    // by re-ordering the commands below.
     if (node == root) break;
+    // printf("IncrementNInFlight called with amount=%i for node%s\n", amount, node->DebugString().c_str());
+    node->IncrementNInFlight(amount);
     node = node->GetParent();
   }
 }
@@ -699,12 +702,11 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
   // node at each level according to the MCTS formula. n_in_flight_ is
   // incremented for each node in the playout (via TryStartScoreUpdate()).
 
-
   Node* node = start_node;
   while (true) {
     if (node->GetParent() == NULL) break;
     node = node->GetParent();
-    if (rand() % 100 < 50) break;
+    if (rand() % 100 < 50 ) break;
   }
 
 //  Node* node = search_->root_node_;
@@ -718,6 +720,7 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
 
   // Fetch the current best root node visits for possible smart pruning.
   int best_node_n = search_->best_move_edge_.GetN();
+  // printf("Best node has %i number of visits\n", best_node_n);
 
   // True on first iteration, false as we dive deeper.
 //  bool is_root_node = true;

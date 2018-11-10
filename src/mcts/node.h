@@ -149,7 +149,9 @@ class Node {
   uint32_t GetNInFlight() const { return n_in_flight_; }
   uint32_t GetChildrenVisits() const { return n_ > 0 ? n_ - 1 : 0; }
   // Returns n = n_if_flight.
-  int GetNStarted() const { return n_ + n_in_flight_; }
+  int GetNStarted() const { return n_in_flight_ < 100 ? n_ + n_in_flight_ : n_; }
+  /* int GetNStarted() const { return n_ + n_in_flight_; }   */
+  /* int GetNStarted() const { return n_ ; }   */
   // Returns node eval, i.e. average subtree V for non-terminal node and -1/0/1
   // for terminal nodes.
   float GetQ() const { return q_; }
@@ -177,8 +179,11 @@ class Node {
   // When search decides to treat one visit as several (in case of collisions
   // or visiting terminal nodes several times), it amplifies the visit by
   // incrementing n_in_flight.
-  void IncrementNInFlight(int multivisit) { n_in_flight_ += multivisit; }
-
+  void IncrementNInFlight(int multivisit) {
+    /* printf("IncrementNInFlight called with multivisit=%i for node%s\n", multivisit, DebugString().c_str()); */
+    /* n_in_flight_ += multivisit; } */
+    n_in_flight_ += 1; }    
+        
   // Updates max depth, if new depth is larger.
   void UpdateMaxDepth(int depth);
 
