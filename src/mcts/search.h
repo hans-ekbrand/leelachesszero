@@ -255,7 +255,7 @@ class SearchWorker {
           is_collision(is_collision) {}
   };
 
-  NodeToProcess PickNodeToExtend(int collision_limit, Node* start_node);
+  NodeToProcess PickNodeToExtend(int collision_limit, Node* start_node, uint16_t start_depth);
   void ExtendNode(Node* node);
   bool AddNodeToComputation(Node* node, bool add_if_cached);
   int PrefetchIntoCache(Node* node, int budget);

@@ -618,6 +618,7 @@ void SearchWorker::GatherMinibatch() {
   int number_out_of_order = 0;
 
   Node* current_node = search_->root_node_;
+  uint16_t current_depth = 0;
 
   // Gather nodes to process in the current batch.
   // If we had too many (kMiniBatchSize) nodes out of order, also interrupt the
@@ -629,8 +630,9 @@ void SearchWorker::GatherMinibatch() {
     // If there's something to process without touching slow neural net, do it.
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
     // Pick next node to extend.
-    SearchWorker::NodeToProcess node_to_extend = PickNodeToExtend(collisions_left, current_node);
+    SearchWorker::NodeToProcess node_to_extend = PickNodeToExtend(collisions_left, current_node, current_depth);
     current_node = node_to_extend.node;
+    current_depth = node_to_extend.depth;
     minibatch_.emplace_back(node_to_extend);
     auto& picked_node = minibatch_.back();
     auto* node = picked_node.node;
@@ -694,19 +696,21 @@ void IncrementNInFlight(Node* node, Node* root, int amount) {
 // Returns node and whether there's been a search collision on the node.
 SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
     int collision_limit,
-    Node* start_node) {
+    Node* start_node,
+    uint16_t start_depth) {
   // Starting from search_->root_node_, generate a playout, choosing a
   // node at each level according to the MCTS formula. n_in_flight_ is
   // incremented for each node in the playout (via TryStartScoreUpdate()).
 
 
-  Node* node = start_node;
   while (true) {
-    if (node->GetParent() == NULL) break;
-    node = node->GetParent();
+    if (start_node->GetParent() == NULL) break;
+    start_node = start_node->GetParent();
+    start_depth--;
     if (rand() % 100 < 50) break;
   }
 
+  Node* node = start_node;
 //  Node* node = search_->root_node_;
 
   Node::Iterator best_edge;
@@ -723,7 +727,7 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
 //  bool is_root_node = true;
   bool is_root_node = node->GetParent() == NULL;
   bool is_first_iteration = true;
-  uint16_t depth = 0;
+  uint16_t depth = start_depth;
 
   while (true) {
     // First, terminate if we find collisions or leaf nodes.
@@ -739,15 +743,23 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
     // n_in_flight_ is incremented. If the method returns false, then there is
     // a search collision, and this node is already being expanded.
     if (!node->TryStartScoreUpdate()) {
-      IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
+      IncrementNInFlight(node, start_node, collision_limit - 1);
+      Node* start_node_parent = start_node->GetParent();
+      if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
+//      IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
       return NodeToProcess::Collision(node, depth, collision_limit);
     }
     // Either terminal or unexamined leaf node -- the end of this playout.
     if (!node->HasChildren()) {
       if (node->IsTerminal()) {
-        IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
+        IncrementNInFlight(node, start_node, collision_limit - 1);
+	    Node* start_node_parent = start_node->GetParent();
+	    if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
+//        IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
         return NodeToProcess::TerminalHit(node, depth, collision_limit);
       } else {
+	    Node* start_node_parent = start_node->GetParent();
+	    if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, 1);
         return NodeToProcess::Extension(node, depth);
       }
     }
