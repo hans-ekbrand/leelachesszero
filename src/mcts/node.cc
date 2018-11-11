@@ -231,12 +231,7 @@ bool Node::TryStartScoreUpdate() {
   return true;
 }
 
-// void Node::CancelScoreUpdate(int multivisit) { n_in_flight_ -= multivisit; }
-void Node::CancelScoreUpdate(int multivisit) {
-  printf("CancelScoreUpdate: called with multivisit = %i, n_in_flight = %i \n", multivisit, n_in_flight_);
-  n_in_flight_ -= multivisit;
-  printf("CancelScoreUpdate: n_in_flight_ = %i\n", n_in_flight_);  
-}  
+void Node::CancelScoreUpdate(int multivisit) { n_in_flight_ -= multivisit; }
 
 void Node::FinalizeScoreUpdate(float v, int multivisit) {
   // Recompute Q.
