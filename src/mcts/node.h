@@ -177,7 +177,12 @@ class Node {
   // When search decides to treat one visit as several (in case of collisions
   // or visiting terminal nodes several times), it amplifies the visit by
   // incrementing n_in_flight.
-  void IncrementNInFlight(int multivisit) { n_in_flight_ += multivisit; }
+  /* void IncrementNInFlight(int multivisit) { n_in_flight_ += multivisit; } */
+  void IncrementNInFlight(int multivisit) {
+    /* if(debug) printf("about to IncrementNInFlight: n_in_flight_ = %i, multivisit = %i\n", n_in_flight_, multivisit); */
+    n_in_flight_ += multivisit;
+    /* if(debug) printf("successfully incremented N in flight\n"); */
+  }
 
   // Updates max depth, if new depth is larger.
   void UpdateMaxDepth(int depth);

@@ -570,24 +570,26 @@ Search::~Search() {
 void SearchWorker::ExecuteOneIteration() {
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
-
+  int debug = 0;
+  if(debug) printf("Step 1\n");
   // 2. Gather minibatch.
   GatherMinibatch();
-
+  if(debug) printf("Step 2\n");
   // 3. Prefetch into cache.
   MaybePrefetchIntoCache();
-
+  if(debug) printf("Step 3\n");
   // 4. Run NN computation.
   RunNNComputation();
-
+  if(debug) printf("Step 4: fetching evaluations\n");
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
-
+  if(debug) printf("Step 5\n");
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
-
+  if(debug) printf("Step 6\n");
   // 7. Update the Search's status and progress information.
   UpdateCounters();
+  if(debug) printf("Step 7\n");
 }
 
 // 1. Initialize internal structures.
@@ -596,7 +598,10 @@ void SearchWorker::InitializeIteration(
     std::unique_ptr<NetworkComputation> computation) {
   computation_ = std::make_unique<CachingComputation>(std::move(computation),
                                                       search_->cache_);
+  int debug = 0;
+  if(debug) printf("Step 1a\n");
   minibatch_.clear();
+  if(debug) printf("Step 1b\n");  
 
   if (!root_move_filter_populated_) {
     root_move_filter_populated_ = true;
@@ -614,6 +619,8 @@ void SearchWorker::GatherMinibatch() {
   int collision_events_left = params_.GetAllowedNodeCollisionEvents();
   int collisions_left = params_.GetAllowedTotalNodeCollisions();
 
+  int debug = 0;
+
   // Number of nodes processed out of order.
   int number_out_of_order = 0;
 
@@ -630,11 +637,15 @@ void SearchWorker::GatherMinibatch() {
     // If there's something to process without touching slow neural net, do it.
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
     // Pick next node to extend.
+    if(debug) printf("Step 2a\n");
     SearchWorker::NodeToProcess node_to_extend = PickNodeToExtend(collisions_left, current_node, current_depth);
+    if(debug) printf("Step 2b\n");    
     current_node = node_to_extend.node;
     current_depth = node_to_extend.depth;
     minibatch_.emplace_back(node_to_extend);
+    if(debug) printf("Step 2c\n");        
     auto& picked_node = minibatch_.back();
+    if(debug) printf("Step 2d\n");            
     auto* node = picked_node.node;
 
     // There was a collision. If limit has been reached, return, otherwise
@@ -685,9 +696,17 @@ void SearchWorker::GatherMinibatch() {
 namespace {
 void IncrementNInFlight(Node* node, Node* root, int amount) {
   if (amount == 0) return;
+  int my_counter = 1;
+  int debug = 0;
+  if(debug) printf("%s\n", root->DebugString().c_str()); // Gotta use root to something, or we get warnings.
   while (true) {
     node->IncrementNInFlight(amount);
-    if (node == root) break;
+    if(debug) printf("my_counter = %i\n", my_counter);
+    my_counter++;
+    // When the position is not the starting position, there is a node without parent which is not the root node. That's strange and may be a bug, but that's why we cant use node == root here.
+    // if (node == root) break;
+    if (node->GetParent() == NULL) break;
+    if(debug) printf("%s\n", node->DebugString().c_str());
     node = node->GetParent();
   }
 }
@@ -698,16 +717,54 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
     int collision_limit,
     Node* start_node,
     uint16_t start_depth) {
+
+  int debug = 0;
   // Starting from search_->root_node_, generate a playout, choosing a
   // node at each level according to the MCTS formula. n_in_flight_ is
   // incremented for each node in the playout (via TryStartScoreUpdate()).
 
+  // When the position is not the starting position, the root node actually has a parent
+  // bool is_root_node = start_node->GetParent() == NULL;
+  bool is_root_node = start_node == search_->root_node_;
 
-  while (true) {
-    if (start_node->GetParent() == NULL) break;
-    start_node = start_node->GetParent();
-    start_depth--;
+  if(debug) printf("Step 2a1 input argument start_depth = %i \n", start_depth);
+  if(is_root_node){
+    if(debug) printf("start_node is root\n");
+  }
+  if(debug) printf("Step 2a2\n");
+  
+  if(!is_root_node & (start_node->GetN() == 0)){
+    if(debug) printf("node is not root and has not been extended\n");
+    if(start_node == search_->root_node_){
+      if(debug) printf("start_node is actually root\n");
+      if(debug) printf("%s\n", start_node->DebugString().c_str());
+    }
+  }
+  
+  // // If start_depth is not above 1 and the node has not been extended (=visited), then we have to start at the grand parent
+  // // Parent belongs to the opponent, don't go there, go the grand parent instead.
+  // if(start_depth > 1 && start_node->GetN() == 0){
+  //   start_node = start_node->GetParent()->GetParent();
+  //   start_depth -= 2;
+  // }
+  
+  // if(!is_root_node & (start_node->GetN() == 0)) start_node = start_node->GetParent();
+  // Traverse the tree upwards a random number of generations
+  while (start_depth > 1) {
     if (rand() % 100 < 50) break;
+    start_node = start_node->GetParent();
+    if(debug) printf("start_depth = %i, traversed the tree, start_node is now: %s\n", start_depth, start_node->DebugString().c_str());
+    // start_node = start_node->GetParent();
+    // printf("becoming grandparent: %s\n", start_node->DebugString().c_str());    
+    // // Does the tree contain the moves of the opponent? I guess it has to, but then does the parent correspond to a move by the opponent?
+    // start_depth -= 2;
+    start_depth--;
+  }
+
+  if(debug) printf("Step 2a3, depth is now: %i\n", start_depth);
+
+  if(start_node == search_->root_node_){
+    if(debug) printf("start_node is root\n");
   }
 
   Node* node = start_node;
@@ -718,16 +775,27 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
   // Initialize position sequence with pre-move position.
   history_.Trim(search_->played_history_.GetLength());
 
+  if(debug) printf("after Trim() node is now: %s\n", node->DebugString().c_str());      
+
+  // if(start_node != search_->root_node_){
+  //   printf("getting best move\n");
+  //   printf("Best move %s\n", best_edge.GetMove(search_->played_history_.IsBlackToMove()).as_string().c_str()); // edge.GetMove(is_black_to_move).as_string()
+  // } else {
+  //   printf("At root_node\n");
+  // }
+
   SharedMutex::Lock lock(search_->nodes_mutex_);
 
   // Fetch the current best root node visits for possible smart pruning.
   int best_node_n = search_->best_move_edge_.GetN();
 
   // True on first iteration, false as we dive deeper.
-//  bool is_root_node = true;
-  bool is_root_node = node->GetParent() == NULL;
+  //  bool is_root_node = true;
+  is_root_node = node == search_->root_node_;
   bool is_first_iteration = true;
   uint16_t depth = start_depth;
+
+  if(debug) printf("starting new search at depth %i\n", start_depth);
 
   while (true) {
     // First, terminate if we find collisions or leaf nodes.
@@ -737,32 +805,50 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
     //            in the beginning (and there would be no need for "if
     //            (!is_root_node)"), but that would mean extra mutex lock.
     //            Will revisit that after rethinking locking strategy.
+    if(debug) printf("about to GetOrSpawnNode node%s\n", node->DebugString().c_str());
     if (!is_first_iteration) node = best_edge.GetOrSpawnNode(/* parent */ node);
+    if(debug) printf("best edge found\n");
     best_edge.Reset();
     depth++;
-    // n_in_flight_ is incremented. If the method returns false, then there is
-    // a search collision, and this node is already being expanded.
-    if (!node->TryStartScoreUpdate()) {
-      IncrementNInFlight(node, start_node, collision_limit - 1);
-      Node* start_node_parent = start_node->GetParent();
-      if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
-//      IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
-      return NodeToProcess::Collision(node, depth, collision_limit);
-    }
+    is_root_node = node != search_->root_node_;
+    // HE: TryStartScoreUpdate() should never be called when node is root.
+    if(node != search_->root_node_){
+      // n_in_flight_ is incremented. If the method returns false, then there is
+      // a search collision, and this node is already being expanded.
+      if (!node->TryStartScoreUpdate()) {
+	if(debug) printf("collision found: node = %s, start_node = %s, collision_limit = %i\n.",
+	       node->DebugString().c_str(), start_node->DebugString().c_str(), collision_limit);
+	IncrementNInFlight(node, start_node, collision_limit - 1);
+	Node* start_node_parent = start_node->GetParent();
+	if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
+	//      IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
+	return NodeToProcess::Collision(node, depth, collision_limit);
+      } else {
+	if(debug) printf("no collision found for node%s\n", node->DebugString().c_str());
+      }
+    } // End of is_root_node
     // Either terminal or unexamined leaf node -- the end of this playout.
     if (!node->HasChildren()) {
       if (node->IsTerminal()) {
-        IncrementNInFlight(node, start_node, collision_limit - 1);
-	    Node* start_node_parent = start_node->GetParent();
-	    if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
-//        IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
-        return NodeToProcess::TerminalHit(node, depth, collision_limit);
+	IncrementNInFlight(node, start_node, collision_limit - 1);
+	Node* start_node_parent = start_node->GetParent();
+	if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, collision_limit);
+	//        IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
+	return NodeToProcess::TerminalHit(node, depth, collision_limit);
       } else {
-	    Node* start_node_parent = start_node->GetParent();
-	    if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, 1);
-        return NodeToProcess::Extension(node, depth);
-      }
-    }
+	if(debug) printf("Segfault here I come 1.\n");	  	  
+	Node* start_node_parent = start_node->GetParent();
+	// Don't bother if start_node_parent is the root node
+	if(start_node_parent != search_->root_node_){
+	  if(debug) printf("Segfault here I come 2.\n");	  	  
+	  if (start_node_parent) IncrementNInFlight(start_node_parent, search_->root_node_, 1);
+	}
+	  if(debug) printf("Segfault here I come 3.\n");	  
+	  return NodeToProcess::Extension(node, depth);
+	}
+	}
+
+	  if(debug) printf("Step 2a4\n");
 
     // If we fall through, then n_in_flight_ has been incremented but this
     // playout remains incomplete; we must go deeper.
@@ -776,6 +862,7 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
             ? -node->GetQ()
             : -node->GetQ() - params_.GetFpuReduction() *
                                   std::sqrt(node->GetVisitedPolicy());
+    if(debug) printf("Step 2a5\n");
     for (auto child : node->Edges()) {
       if (is_root_node) {
         // If there's no chance to catch up to the current best node with
@@ -820,14 +907,20 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
       second_best_edge.Reset();
     }
 
-    history_.Append(best_edge.GetMove());
+    if(node != search_->root_node_){
+	  if(debug) printf("Step 2a6\n");
+	  if(debug) printf("Best move %s\n", best_edge.GetMove().as_string().c_str()); // edge.GetMove(is_black_to_move).as_string()
+	  if(debug) printf("Step 2a6.3\n");
+	  history_.Append(best_edge.GetMove());
+	  if(debug) printf("Step 2a6.5\n");
+	}
     if (is_root_node && possible_moves <= 1 && !search_->limits_.infinite) {
       // If there is only one move theoretically possible within remaining time,
       // output it.
       Mutex::Lock counters_lock(search_->counters_mutex_);
       search_->found_best_move_ = true;
     }
-    is_root_node = false;
+    if(debug) printf("Step 2a7\n");    
     is_first_iteration = false;
   }
 }
@@ -1089,12 +1182,35 @@ void SearchWorker::DoBackupUpdate() {
 void SearchWorker::DoBackupUpdateSingleNode(
     const NodeToProcess& node_to_process) REQUIRES(search_->nodes_mutex_) {
   Node* node = node_to_process.node;
+
+  int debug = 0;
+    
   if (node_to_process.IsCollision()) {
     // If it was a collision, just undo counters.
-    for (node = node->GetParent(); node != search_->root_node_->GetParent();
+	  if(debug) printf("Step 6a\n");
+    printf("Depth of current node: %i\n", node_to_process.depth);
+    // // If depth is zero, then return now
+    // if(node_to_process.depth == 0) return;
+    // for (node = node->GetParent(); node != search_->root_node_->GetParent();
+    for (node = node->GetParent(); node != search_->root_node_;    
          node = node->GetParent()) {
-      node->CancelScoreUpdate(node_to_process.multivisit);
+      if(debug) // printf("Step 6a1\n");
+      if(node == NULL){
+	if(debug) printf("node is null, returning now\n");
+	return;
+      }
+      int current_node_is_actually_root = node == search_->root_node_;
+      if(debug) printf("Is current node root? %i\n", current_node_is_actually_root);
+      // printf("%s\n", node->DebugString().c_str());
+      int current_node_has_parents = node->GetParent() != NULL;
+      if(debug) printf("Has current node parents? %i\n", current_node_has_parents);      
+      if(current_node_is_actually_root == 0 && current_node_has_parents){
+	if(debug) printf("Step 6a2\n");      
+	node->CancelScoreUpdate(node_to_process.multivisit);
+      }
+      if(debug) printf("Step 6a3\n");      
     }
+    if(debug) printf("Step 6b\n");    
     return;
   }
 
@@ -1102,6 +1218,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
   float v = node_to_process.v;
   for (Node* n = node; n != search_->root_node_->GetParent();
        n = n->GetParent()) {
+
     n->FinalizeScoreUpdate(v, node_to_process.multivisit);
     // Q will be flipped for opponent.
     v = -v;
