@@ -691,7 +691,7 @@ void IncrementNInFlight(Node* node, Node* root, int amount) {
 
 void SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit, int& npick) {
     Node::Iterator best_edge;
-    best_edge.Reset();
+    best_edge.Reset();  // probably not necessary
     depth++;
     // n_in_flight_ is incremented. If the method returns false, then there is
     // a search collision, and this node is already being expanded.
@@ -782,6 +782,7 @@ void SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_ed
     if (npick == 0) return;
     history_.Pop();
     if (second_best_edge2) {
+      IncrementNInFlight(node, search_->root_node_, 1);
       PickNodeToExtendRec(second_best_edge2.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit, npick);
     }
 }
