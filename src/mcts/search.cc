@@ -686,37 +686,8 @@ void IncrementNInFlight(Node* node, Node* root, int amount) {
 }
 }  // namespace
 
-// Returns node and whether there's been a search collision on the node.
-SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
-    int collision_limit) {
-  // Starting from search_->root_node_, generate a playout, choosing a
-  // node at each level according to the MCTS formula. n_in_flight_ is
-  // incremented for each node in the playout (via TryStartScoreUpdate()).
-
-  Node* node = search_->root_node_;
-  Node::Iterator best_edge;
-  Node::Iterator second_best_edge;
-  // Initialize position sequence with pre-move position.
-  history_.Trim(search_->played_history_.GetLength());
-
-  SharedMutex::Lock lock(search_->nodes_mutex_);
-
-  // Fetch the current best root node visits for possible smart pruning.
-  int best_node_n = search_->best_move_edge_.GetN();
-
-  // True on first iteration, false as we dive deeper.
-  bool is_root_node = true;
-  uint16_t depth = 0;
-
-  while (true) {
-    // First, terminate if we find collisions or leaf nodes.
-    // Set 'node' to point to the node that was picked on previous iteration,
-    // possibly spawning it.
-    // TODO(crem) This statement has to be in the end of the loop rather than
-    //            in the beginning (and there would be no need for "if
-    //            (!is_root_node)"), but that would mean extra mutex lock.
-    //            Will revisit that after rethinking locking strategy.
-    if (!is_root_node) node = best_edge.GetOrSpawnNode(/* parent */ node);
+SearchWorker::NodeToProcess SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit) {
+    Node::Iterator best_edge;
     best_edge.Reset();
     depth++;
     // n_in_flight_ is incremented. If the method returns false, then there is
@@ -795,8 +766,29 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
       Mutex::Lock counters_lock(search_->counters_mutex_);
       search_->found_best_move_ = true;
     }
-    is_root_node = false;
-  }
+
+    return PickNodeToExtendRec(best_edge.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit);
+    // depth--;
+}
+
+// Returns node and whether there's been a search collision on the node.
+SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
+    int collision_limit) {
+  // Starting from search_->root_node_, generate a playout, choosing a
+  // node at each level according to the MCTS formula. n_in_flight_ is
+  // incremented for each node in the playout (via TryStartScoreUpdate()).
+
+  Node* node = search_->root_node_;
+  Node::Iterator second_best_edge;
+  // Initialize position sequence with pre-move position.
+  history_.Trim(search_->played_history_.GetLength());
+
+  SharedMutex::Lock lock(search_->nodes_mutex_);
+
+  // Fetch the current best root node visits for possible smart pruning.
+  int best_node_n = search_->best_move_edge_.GetN();
+
+  return PickNodeToExtendRec(node, second_best_edge, true, 0, best_node_n, collision_limit);
 }
 
 void SearchWorker::ExtendNode(Node* node) {
