@@ -686,7 +686,7 @@ void IncrementNInFlight(Node* node, Node* root, int amount) {
 }
 }  // namespace
 
-SearchWorker::NodeToProcess SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit) {
+SearchWorker::NodeToProcess SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator& second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit) {
     Node::Iterator best_edge;
     best_edge.Reset();
     depth++;
