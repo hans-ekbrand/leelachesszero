@@ -695,14 +695,17 @@ void SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator& second_best_e
     if (!node->TryStartScoreUpdate()) {
       IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
       minibatch_.emplace_back(NodeToProcess::Collision(node, depth, collision_limit));
+      return;
     }
     // Either terminal or unexamined leaf node -- the end of this playout.
     if (!node->HasChildren()) {
       if (node->IsTerminal()) {
         IncrementNInFlight(node, search_->root_node_, collision_limit - 1);
         minibatch_.emplace_back(NodeToProcess::TerminalHit(node, depth, collision_limit));
+        return;
       } else {
         minibatch_.emplace_back(NodeToProcess::Extension(node, depth));
+        return;
       }
     }
 
