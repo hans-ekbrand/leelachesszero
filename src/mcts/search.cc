@@ -672,6 +672,9 @@ void SearchWorker::GatherMinibatch() {
       --minibatch_size;
       ++number_out_of_order;
     }
+    // Squeeze out more than one node of this promising node!
+    // 1. automatically spawn new child nodes if this promising node is a move of Alpha
+    
   }
 }
 
