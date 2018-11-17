@@ -674,8 +674,87 @@ void SearchWorker::GatherMinibatch() {
     }
     // Squeeze out more than one node of this promising node!
     // 1. automatically spawn new child nodes if this promising node is a move of Alpha
-    
-  }
+
+    // If this node represents a move by Alpha, then create _all_ children
+    // to this node (they represent the moves of Beta) and place the children directly in the queue. 
+
+    // If this node represents a move by Beta, then do nothing.
+
+    // Having excessive number of bad nodes for Beta is not problem, since only the best
+    // moves for Alpha will get picked.
+
+    // To determine if the node correponds to a move by Alpha we need the depth, which is in
+    // the NodeToProcess:: object picked_node
+    bool opponents_move = true;
+    if(picked_node.depth % 2 == 0) opponents_move = false;
+
+    ////////////// Log the moves that lead up to the current node, unless it is root START
+    if(node != search_->root_node_){
+      bool opponents_move_local = opponents_move;
+      std::string my_string = "";
+      for(Node* my_node = node; my_node != search_->root_node_;
+	  my_node = my_node->GetParent()){
+	const Edge* my_edge = my_node->GetParent()->GetEdgeToNode(my_node);
+	if(my_node != node) my_string.insert(0, "-");
+	my_string.insert(0, my_edge->GetMove(opponents_move_local).as_string());
+	if(!opponents_move_local) {
+	  opponents_move_local = true;
+	} else {
+	  opponents_move_local = false;
+	}
+      }
+      LOGFILE << my_string;
+    }
+    ////////////// Log the moves that lead up to the current node, unless it is root END
+
+    if(!opponents_move){
+      LOGFILE << "Alpha to move";
+      // Get all edges, Spawn all nodes, place all nodes on the queue
+      // Since we know these nodes have no eval we don't have to check
+      // for new bestmove or second best etc.
+      for (auto child : node->Edges()) {
+	// Create it
+	Node* child_node = child.GetOrSpawnNode(/* parent */ node);
+
+	// Extend it.
+	ExtendNode(child_node);
+
+	// Place in it the queue, mimic the original code
+	minibatch_.emplace_back(NodeToProcess::Extension(child_node, picked_node.depth+1));
+	auto& picked_child_node = minibatch_.back();
+
+	// Only send non-terminal nodes to a neural network.
+	if (!child_node->IsTerminal()) {
+	  picked_child_node.nn_queried = true;
+	  picked_child_node.is_cache_hit = AddNodeToComputation(child_node, true);
+	}
+
+	if (params_.GetOutOfOrderEval() && picked_node.CanEvalOutOfOrder()) {
+	  // Perform out of order eval for the last entry in minibatch_.
+	  FetchSingleNodeResult(&picked_node, computation_->GetBatchSize() - 1);
+	  {
+	    // Nodes mutex for doing node updates.
+	    SharedMutex::Lock lock(search_->nodes_mutex_);
+	    DoBackupUpdateSingleNode(picked_node);
+	  }
+
+	  // Remove last entry in minibatch_, as it has just been
+	  // processed.
+	  // If NN eval was already processed out of order, remove it.
+	  if (picked_node.nn_queried) computation_->PopCacheHit();
+	  minibatch_.pop_back();
+	  --minibatch_size;
+	  ++number_out_of_order;
+	}
+
+	// Edge* my_edge = node->GetEdgeToNode(child_node);
+	// LOGFILE << "Expanding move: " << my_edge->GetMove(opponents_move_local).as_string();
+      }
+    } else { // End of !opponents_move
+      LOGFILE << "Beta to move";
+    }
+
+  } // End of while
 }
 
 namespace {
