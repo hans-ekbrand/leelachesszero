@@ -1137,11 +1137,9 @@ void SearchWorker::DoBackupUpdate() {
   for (const NodeToProcess& node_to_process : minibatch_) {
     DoBackupUpdateSingleNode(node_to_process);
   }
-  // for (const NodeToProcess& node_to_process : minibatch_) {
-  //   if(node_to_process.node->GetParent() == search_->root_node_){
-  //     LOGFILE << "Move at root: " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove().as_string() << " Guraranteed Q: " << node_to_process.node->GetMinQ();
-  //   }
-  // }
+
+  // For minimax:
+  // Each node with children should store a pointer to the child with the know best Q. That way we can a) directly tell if the Q of the node needs to updated when a child is updated; b) stop back-propagating early.
 }
 
 void SearchWorker::DoBackupUpdateSingleNode(
@@ -1157,7 +1155,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
   }
 
 
-  float best = std::numeric_limits<float>::max(); // used for minimax
+  // float best = std::numeric_limits<float>::max(); // used for minimax
+  float best = 10000; // used for minimax  
 
   // Backup V value up to a root. After 1 visit, V = Q.
   float v = node_to_process.v;
