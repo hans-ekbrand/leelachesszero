@@ -154,6 +154,11 @@ class Node {
   // for terminal nodes.
   float GetQ() const { return q_; }
 
+  // Returns the highest _guaranteed_ q 
+  float GetMinQ() const { return min_q_; }
+  // Set the highest _guaranteed_ q 
+  void SetMinQ(float new_q) { min_q_ = new_q ; }
+
   // Returns whether the node is known to be draw/lose/win.
   bool IsTerminal() const { return is_terminal_; }
   uint16_t GetNumEdges() const { return edges_.size(); }
@@ -233,6 +238,7 @@ class Node {
   // of the player who "just" moved to reach this position, rather than from the
   // perspective of the player-to-move for the position.
   float q_ = 0.0f;
+  float min_q_ = 0.0f;
   // Sum of policy priors which have had at least one playout.
   float visited_policy_ = 0.0f;
   // How many completed visits this node had.
