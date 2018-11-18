@@ -215,7 +215,7 @@ void Search::SendMovesStats() const {
 
     if (edge.IsTerminal()) oss << "(T) ";
 
-    // This segfaults
+    // // This segfaults, no clue why.
     // oss << "(minQ: )" << std::setw(8) << std::setprecision(5) << edge.node()->GetMinQ();	
 
     info.comment = oss.str();
@@ -1154,17 +1154,16 @@ void SearchWorker::DoBackupUpdateSingleNode(
     return;
   }
 
-
-  // float best = std::numeric_limits<float>::max(); // used for minimax
-  float best = 10000; // used for minimax  
+  float best = std::numeric_limits<float>::max(); // used for minimax
+  // float best = 10000; // used for minimax  
 
   // Backup V value up to a root. After 1 visit, V = Q.
   float v = node_to_process.v;
 
   // /////////////////// Minimax I Start  
-  // if(node_to_process.node != search_->root_node_) {
-  //   LOGFILE << "Show some raw data about the current node: " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(node_to_process.depth % 2 != 0).as_string() << node_to_process.node->DebugString();
-  // }
+  if(node_to_process.node != search_->root_node_) {
+    LOGFILE << "Show some raw data about the current node: " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(node_to_process.depth % 2 != 0).as_string() << node_to_process.node->DebugString() << " raw v-value of node is: " << v;
+  }
   bool opponents_move = true;
   if(node_to_process.depth % 2 == 0) opponents_move = false;
   
@@ -1190,9 +1189,9 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // Never set minQ for root
     if(n->HasChildren()){
       if(n != search_->root_node_ && n != node_to_process.node){
-    	LOGFILE << "Updating MinQ for minimax for node " << n->DebugString() << " " << n->GetParent()->GetEdgeToNode(n)->GetMove(!opponents_move).as_string() << " current value: " << n->GetMinQ();
-    	if(!n->GetMinQ()) { n->SetMinQ(best); } // If not defined, set to something extremely low
-    	float q_of_worst_edge = best; // start high, so real nodes can beat you to it.
+    	LOGFILE << "Updating MinQ for minimax for node" << n->DebugString() << " " << n->GetParent()->GetEdgeToNode(n)->GetMove(!opponents_move).as_string() << " current value: " << n->GetMinQ();
+    	// if(!n->GetMinQ()) { n->SetMinQ(best); LOGFILE << "setting MinQ to " << best ; } // If not defined, set to something extremely high
+    	float q_of_worst_edge = best ; // start high, so real nodes can beat you to it.
     	for (auto child : n->Edges()) {
     	  // Go through all children and find the highest Q, that is highest -Q, since their Q is from the opponents side
     	  if(child.node() != NULL){
@@ -1214,7 +1213,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     	  if(n->GetMinQ() > q_of_worst_edge){
     	    LOGFILE << "Evaluation is getting worse " << "old best was: " << n->GetMinQ() << " new best is " << q_of_worst_edge << n->DebugString();
     	  }
-    	  // LOGFILE << "min_q_ updated to: " << q_of_worst_edge;
+    	  LOGFILE << "min_q_ updated to: " << q_of_worst_edge;
     	  n->SetMinQ(q_of_worst_edge);
     	}
       }
