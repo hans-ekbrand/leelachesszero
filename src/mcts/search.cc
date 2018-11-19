@@ -216,7 +216,9 @@ void Search::SendMovesStats() const {
     if (edge.IsTerminal()) oss << "(T) ";
 
     // // This segfaults, no clue why.
-    // oss << "(minQ: )" << std::setw(8) << std::setprecision(5) << edge.node()->GetMinQ();	
+    if (edge.node()){
+      oss << "(minQ: )" << std::setw(8) << std::setprecision(5) << edge.node()->GetMinQ();
+    }
 
     info.comment = oss.str();
   }
@@ -609,6 +611,17 @@ void SearchWorker::InitializeIteration(
   }
 }
 
+namespace {
+void IncrementNInFlight(Node* node, Node* root, int amount) {
+  if (amount == 0) return;
+  while (true) {
+    node->IncrementNInFlight(amount);
+    if (node == root) break;
+    node = node->GetParent();
+  }
+}
+}  // namespace
+
 // 2. Gather minibatch.
 // ~~~~~~~~~~~~~~~~~~~~
 void SearchWorker::GatherMinibatch() {
@@ -720,10 +733,15 @@ void SearchWorker::GatherMinibatch() {
 	  }
 	  // Create it
 	  Node* child_node = child.GetOrSpawnNode(/* parent */ node);
+	  // Get it's edge
+	  Edge* my_edge = node->GetEdgeToNode(child_node);
+	  // Add move to history
+	  history_.Append(my_edge->GetMove());
 	  // Extend it.
 	  ExtendNode(child_node);
 	  // Place in it the queue, mimic the original code
 	  minibatch_.emplace_back(NodeToProcess::Extension(child_node, picked_node.depth+1));
+	  IncrementNInFlight(child_node, search_->root_node_, 1);
 	  ++minibatch_size;
 	  auto& picked_child_node = minibatch_.back();
 	  // Only send non-terminal nodes to a neural network.
@@ -731,6 +749,8 @@ void SearchWorker::GatherMinibatch() {
 	    picked_child_node.nn_queried = true;
 	    picked_child_node.is_cache_hit = AddNodeToComputation(child_node, true);
 	  }
+	  // Now that AddNodeToComputation has added the board position, roll-back the position one ply
+	  history_.Pop();
 	  // If the node is terminal, get the result instead of evaluating it on the NN
 	  // Also, if the node already cached the read the evaluation from the cache instead
 	  // of repeating the evaluation.
@@ -750,9 +770,9 @@ void SearchWorker::GatherMinibatch() {
 	    minibatch_.pop_back();
 	    --minibatch_size;
 	    ++number_out_of_order;
+	  } else {
+	    LOGFILE << "Actually placing this move in the real NN evaluation queue: " << my_edge->GetMove(true).as_string();
 	  }
-	  Edge* my_edge = node->GetEdgeToNode(child_node);
-	  LOGFILE << "Expanding move: " << my_edge->GetMove(true).as_string();
 	}
       } else {
 	LOGFILE << "Beta to move: " << my_string;
@@ -760,17 +780,6 @@ void SearchWorker::GatherMinibatch() {
     } // End of while
   }
 }
-
-namespace {
-void IncrementNInFlight(Node* node, Node* root, int amount) {
-  if (amount == 0) return;
-  while (true) {
-    node->IncrementNInFlight(amount);
-    if (node == root) break;
-    node = node->GetParent();
-  }
-}
-}  // namespace
 
 // Returns node and whether there's been a search collision on the node.
 SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
@@ -853,7 +862,8 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
         }
         ++possible_moves;
       }
-      float Q = child.GetQ(parent_q);
+      // float Q = child.GetMinQ(parent_q);
+      float Q = child.GetQ(parent_q);      
       const float score = child.GetU(puct_mult) + Q;
       if (score > best) {
         second_best = best;
@@ -1102,6 +1112,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     node_to_process->v = node->GetQ();
     return;
   }
+  // LOGFILE << "adding Q and P to node " << node_to_process->node->DebugString() << " Q=" << -computation_->GetQVal(idx_in_computation) << " idx in computation=" << idx_in_computation;
   // For NN results, we need to populate policy as well as value.
   // First the value...
   node_to_process->v = -computation_->GetQVal(idx_in_computation);
@@ -1136,15 +1147,15 @@ void SearchWorker::DoBackupUpdate() {
 
   for (const NodeToProcess& node_to_process : minibatch_) {
     DoBackupUpdateSingleNode(node_to_process);
+    DoBackupUpdateSingleNodeMinQ(node_to_process);
   }
-
-  // For minimax:
-  // Each node with children should store a pointer to the child with the know best Q. That way we can a) directly tell if the Q of the node needs to updated when a child is updated; b) stop back-propagating early.
+  PropagateMinQ();
 }
 
 void SearchWorker::DoBackupUpdateSingleNode(
     const NodeToProcess& node_to_process) REQUIRES(search_->nodes_mutex_) {
   Node* node = node_to_process.node;
+
   if (node_to_process.IsCollision()) {
     // If it was a collision, just undo counters.
     for (node = node->GetParent(); node != search_->root_node_->GetParent();
@@ -1154,71 +1165,12 @@ void SearchWorker::DoBackupUpdateSingleNode(
     return;
   }
 
-  float best = std::numeric_limits<float>::max(); // used for minimax
-  // float best = 10000; // used for minimax  
-
   // Backup V value up to a root. After 1 visit, V = Q.
   float v = node_to_process.v;
 
-  // /////////////////// Minimax I Start  
-  if(node_to_process.node != search_->root_node_) {
-    LOGFILE << "Show some raw data about the current node: " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(node_to_process.depth % 2 != 0).as_string() << node_to_process.node->DebugString() << " raw v-value of node is: " << v;
-  }
-  bool opponents_move = true;
-  if(node_to_process.depth % 2 == 0) opponents_move = false;
-  
-  if(node_to_process.node != search_->root_node_){
-    if(opponents_move) {
-      node_to_process.node->SetMinQ(-v);
-      // LOGFILE << "Initializing MinQ on node " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(opponents_move).as_string() << " to value " << -v << " (rev) depth: " << node_to_process.depth;
-    } else {
-      node_to_process.node->SetMinQ(v);
-      // LOGFILE << "Initializing MinQ on node " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(opponents_move).as_string() << " to value " << v << " (raw) depth: " << node_to_process.depth;
-    }
-  }
-
-  /////////////////// Minimax I End
-
   for (Node* n = node; n != search_->root_node_->GetParent();
        n = n->GetParent()) {
-    opponents_move = !opponents_move; // minimax
     n->FinalizeScoreUpdate(v, node_to_process.multivisit);
-
-    /////////////////// Minimax II start
-    // If n has children, set Q to the currently best Q among those children.
-    // Never set minQ for root
-    if(n->HasChildren()){
-      if(n != search_->root_node_ && n != node_to_process.node){
-    	LOGFILE << "Updating MinQ for minimax for node" << n->DebugString() << " " << n->GetParent()->GetEdgeToNode(n)->GetMove(!opponents_move).as_string() << " current value: " << n->GetMinQ();
-    	// if(!n->GetMinQ()) { n->SetMinQ(best); LOGFILE << "setting MinQ to " << best ; } // If not defined, set to something extremely high
-    	float q_of_worst_edge = best ; // start high, so real nodes can beat you to it.
-    	for (auto child : n->Edges()) {
-    	  // Go through all children and find the highest Q, that is highest -Q, since their Q is from the opponents side
-    	  if(child.node() != NULL){
-    	    LOGFILE << "Getting Q from" << child.node()->DebugString() << " " << child.GetMove(opponents_move).as_string();
-    	    LOGFILE << "q of child=" << -child.node()->GetMinQ() << " best=" << q_of_worst_edge;
-    	    if (-child.node()->GetMinQ() < q_of_worst_edge) {
-    	      q_of_worst_edge = -child.node()->GetMinQ();
-    	    }
-    	  }
-    	}
-    	// LOGFILE << "All edges (possibly zero edges) have been iterated through for move" << n->DebugString(); 
-    	// update min_q_, if neccessary
-    	if(n->GetMinQ() == q_of_worst_edge){
-    	  LOGFILE << "No change";
-    	} else {
-    	  if(n->GetMinQ() < q_of_worst_edge){
-    	    LOGFILE << "Improvement found, yay! " << "old best was: " << n->GetMinQ() << " new best is " << q_of_worst_edge << n->DebugString();
-    	  }
-    	  if(n->GetMinQ() > q_of_worst_edge){
-    	    LOGFILE << "Evaluation is getting worse " << "old best was: " << n->GetMinQ() << " new best is " << q_of_worst_edge << n->DebugString();
-    	  }
-    	  LOGFILE << "min_q_ updated to: " << q_of_worst_edge;
-    	  n->SetMinQ(q_of_worst_edge);
-    	}
-      }
-    }
-    /////////////////// Minimax II end
 
     // Q will be flipped for opponent.
     v = -v;
@@ -1234,7 +1186,81 @@ void SearchWorker::DoBackupUpdateSingleNode(
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth;
   search_->max_depth_ = std::max(search_->max_depth_, node_to_process.depth);
-}  // namespace lczero
+}
+
+void SearchWorker::DoBackupUpdateSingleNodeMinQ(const NodeToProcess& node_to_process) REQUIRES(search_->nodes_mutex_) {    
+  // Set MinQ, but don't backpropagate yet!
+  if(node_to_process.node != search_->root_node_) {
+    LOGFILE << "Show some raw data about the current node: " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(node_to_process.depth % 2 != 0).as_string() << node_to_process.node->DebugString() << " raw v-value of node is: " << node_to_process.v << " depth: " << node_to_process.depth;
+  }
+  bool opponents_move = true;
+  if(node_to_process.v != 0) { // For same strange reason the same node comes up again, but the second time node_to_process.v is always "-0"
+    if(node_to_process.depth % 2 == 0) opponents_move = false;
+    if(node_to_process.node != search_->root_node_){
+      if(opponents_move) {
+	node_to_process.node->SetMinQ(-node_to_process.v);
+	LOGFILE << "Initializing MinQ on node " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(opponents_move).as_string() << " to value " << -node_to_process.v << " (rev) depth: " << node_to_process.depth;
+      } else {
+	node_to_process.node->SetMinQ(node_to_process.v);
+	LOGFILE << "Initializing MinQ on node " << node_to_process.node->GetParent()->GetEdgeToNode(node_to_process.node)->GetMove(opponents_move).as_string() << " to value " << node_to_process.v << " (raw) depth: " << node_to_process.depth;
+      }
+    }
+  }
+}
+
+void SearchWorker::PropagateMinQ() {
+  
+  // For minimax:
+  // Each node with children should store a pointer to the child with the know best Q. That way we can a) directly tell if the Q of the node needs to updated when a child is updated; b) stop back-propagating early.
+
+  // Minimax Calculate MinQ and backpropagate
+  for (const NodeToProcess& node_to_process : minibatch_) {
+
+    float best = std::numeric_limits<float>::max(); // Need a value higher than any real node's Q.
+    bool opponents_move = true;
+    if(node_to_process.depth % 2 == 0) opponents_move = false;
+
+    for (Node* n = node_to_process.node; n != search_->root_node_->GetParent(); n = n->GetParent()) {
+
+      opponents_move = !opponents_move;
+
+      // If n has children, set Q to the currently best Q among those children.
+      if(n->HasChildren()){
+	// Never set minQ for root.
+	if(n != search_->root_node_ && n != node_to_process.node){
+	  LOGFILE << "Updating MinQ for minimax for node" << n->DebugString() << " " << n->GetParent()->GetEdgeToNode(n)->GetMove(!opponents_move).as_string() << " current value: " << n->GetMinQ();
+	  // Need a big number which edges can be less than as a starting point for the comparison, best is the largest possible float.
+	  float q_of_worst_edge = best;
+	  for (auto child : n->Edges()) {
+	    // Go through all children and find the highest Q, that is highest -Q, since their Q is from the opponents side
+	    if(child.node() != NULL){
+	      LOGFILE << "Getting Q from" << child.node()->DebugString() << " " << child.GetMove(opponents_move).as_string();
+	      LOGFILE << "q of child=" << child.node()->GetMinQ() << " best=" << q_of_worst_edge;
+	      if (child.node()->GetMinQ() < q_of_worst_edge) {
+		q_of_worst_edge = child.node()->GetMinQ();
+	      }
+	    }
+	  }
+	  // LOGFILE << "All edges (possibly zero edges) have been iterated through for move" << n->DebugString(); 
+	  // update min_q_, if neccessary
+	  if(n->GetMinQ() == q_of_worst_edge){
+	    LOGFILE << "No change";
+	  } else {
+	    if(n->GetMinQ() > q_of_worst_edge){
+	      LOGFILE << "Evaluation is getting worse " << "old best was: " << n->GetMinQ() << " new best is " << q_of_worst_edge << n->DebugString();
+	    }
+	    if(n->GetMinQ() < q_of_worst_edge){
+	      LOGFILE << "Improvement found, yay! " << "old best was: " << n->GetMinQ() << " new best is " << q_of_worst_edge << n->DebugString();
+	    }
+	    LOGFILE << "min_q_ updated to: " << q_of_worst_edge;
+	    n->SetMinQ(q_of_worst_edge);
+	  }
+	}
+      }
+    }
+  }
+}
+
 
 // 7. Update the Search's status and progress information.
 //~~~~~~~~~~~~~~~~~~~~

@@ -262,6 +262,8 @@ class SearchWorker {
   void FetchSingleNodeResult(NodeToProcess* node_to_process,
                              int idx_in_computation);
   void DoBackupUpdateSingleNode(const NodeToProcess& node_to_process);
+  void DoBackupUpdateSingleNodeMinQ(const NodeToProcess& node_to_process);
+  void PropagateMinQ();  
 
   Search* const search_;
   // List of nodes to process.

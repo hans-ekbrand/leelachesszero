@@ -301,7 +301,10 @@ class EdgeAndNode {
 
   // Proxy functions for easier access to node/edge.
   float GetQ(float default_q) const {
-    return (node_ && node_->GetN() > 0) ? node_->GetQ() : default_q;
+    return (node_ && node_->GetN() > 0) ? node_->GetQ() : default_q;    
+  }
+  float GetMinQ(float default_q) const {
+    return (node_ && node_->GetN() > 0) ? node_->GetMinQ() : default_q;    
   }
   // N-related getters, from Node (if exists).
   uint32_t GetN() const { return node_ ? node_->GetN() : 0; }
