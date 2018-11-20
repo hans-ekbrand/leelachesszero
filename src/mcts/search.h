@@ -255,8 +255,9 @@ class SearchWorker {
           is_collision(is_collision) {}
   };
 
-  void PickNodeToExtendRec(Node *node, Node::Iterator second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit, int& npick);
-  void PickNodeToExtend(int collision_limit, int npick);
+  bool AddNodeToMiniBatch(NodeToProcess picked_node, int& minibatch_size, int& collision_events_left, int& collisions_left, int& number_out_of_order);
+  bool PickNodeToExtendRec(Node *node, Node::Iterator second_best_edge, bool is_root_node, uint16_t depth, int best_node_n, int collision_limit, int& minibatch_size, int& collision_events_left, int& collisions_left, int& number_out_of_order, int& npick);
+  bool PickNodeToExtend(int collision_limit, int& minibatch_size, int& collision_events_left, int& collisions_left, int& number_out_of_order, int npick);
   void ExtendNode(Node* node);
   bool AddNodeToComputation(Node* node, bool add_if_cached);
   int PrefetchIntoCache(Node* node, int budget);
