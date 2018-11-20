@@ -723,67 +723,69 @@ void SearchWorker::GatherMinibatch() {
       	}
       }
       if(!opponents_move){
-	LOGFILE << "Alpha to move: " << my_string;
-	// Get all edges, Spawn all nodes, place all nodes on the queue
-	// Since we know these nodes have no eval we don't have to check
-	// for new bestmove or second best etc.
-	int my_depth = picked_node.depth + 1;
-	for (auto child : node->Edges()) {
-	  if(minibatch_size >= params_.GetMiniBatchSize() ||
-	     number_out_of_order >= params_.GetMiniBatchSize()) {
-	    LOGFILE << "Batch is full, returning early, size of batch is now: " << minibatch_size;
-	    return;
-	  }
-	  // Create it
-	  Node* child_node = child.GetOrSpawnNode(/* parent */ node);
-	  // Get it's edge
-	  Edge* my_edge = node->GetEdgeToNode(child_node);
-	  // Add move to history
-	  history_.Append(my_edge->GetMove());
-	  // Extend it.
-	  ExtendNode(child_node);
-	  // Place in it the queue, mimic the original code
-	  minibatch_.emplace_back(NodeToProcess::Extension(child_node, my_depth));
-	  IncrementNInFlight(child_node, search_->root_node_, 1);
-	  ++minibatch_size;
-	  auto& picked_child_node = minibatch_.back();
-	  // Only send non-terminal nodes to a neural network.
-	  // This seems to have strange side-effects on picked_node.depth, since sometimes it goes from 3 go 265 between this ..
-	  // LOGFILE << " C.0 Depth is still " << picked_node.depth+1;
-	  if (!child_node->IsTerminal()) {
-	    picked_child_node.nn_queried = true;
-	    picked_child_node.is_cache_hit = AddNodeToComputation(child_node, true);
-	  }
-	  // ... and this
-	  // LOGFILE << " C.1 Depth is still " << picked_node.depth+1;	  
-	  // Now that AddNodeToComputation has added the board position, roll-back the position one ply
-	  history_.Pop();
-	  // If the node is terminal, get the result instead of evaluating it on the NN
-	  // Also, if the node already cached the read the evaluation from the cache instead
-	  // of repeating the evaluation.
-	  if (params_.GetOutOfOrderEval() && picked_child_node.CanEvalOutOfOrder()) {
-	    // Perform out of order eval for the last entry in minibatch_.
-	    FetchSingleNodeResult(&picked_child_node, computation_->GetBatchSize() - 1);
-	    {
-	      // Nodes mutex for doing node updates.
-	      SharedMutex::Lock lock(search_->nodes_mutex_);
-	      DoBackupUpdateSingleNode(picked_child_node);
-	    }
+    	LOGFILE << "Alpha to move: " << my_string;
+    	// Get all edges, Spawn all nodes, place all nodes on the queue
+    	// Since we know these nodes have no eval we don't have to check
+    	// for new bestmove or second best etc.
+    	int my_depth = picked_node.depth + 1;
+    	for (auto child : node->Edges()) {
+    	  if(minibatch_size >= params_.GetMiniBatchSize() ||
+    	     number_out_of_order >= params_.GetMiniBatchSize()) {
+    	    LOGFILE << "Batch is full, returning early, size of batch is now: " << minibatch_size;
+    	    return;
+    	  }
+    	  // Create it
+    	  Node* child_node = child.GetOrSpawnNode(/* parent */ node);
+    	  // Get it's edge
+    	  Edge* my_edge = node->GetEdgeToNode(child_node);
+    	  // Add move to history
+    	  history_.Append(my_edge->GetMove());
+    	  // Extend it.
+    	  ExtendNode(child_node);
+    	  // Place in it the queue, mimic the original code
+    	  minibatch_.emplace_back(NodeToProcess::Extension(child_node, my_depth));
+	  // SharedMutex::Lock lock(search_->nodes_mutex_);
+    	  IncrementNInFlight(child_node, search_->root_node_, 1); // Need lock, or n_in_flight_ will be wrong, but I don't know how to implment it.
+	  // SharedMutex::Lock unlock(search_->nodes_mutex_);
+    	  ++minibatch_size;
+    	  auto& picked_child_node = minibatch_.back();
+    	  // Only send non-terminal nodes to a neural network.
+    	  // This seems to have strange side-effects on picked_node.depth, since sometimes it goes from 3 go 265 between this ..
+    	  // LOGFILE << " C.0 Depth is still " << picked_node.depth+1;
+    	  if (!child_node->IsTerminal()) {
+    	    picked_child_node.nn_queried = true;
+    	    picked_child_node.is_cache_hit = AddNodeToComputation(child_node, true);
+    	  }
+    	  // ... and this
+    	  // LOGFILE << " C.1 Depth is still " << picked_node.depth+1;	  
+    	  // Now that AddNodeToComputation has added the board position, roll-back the position one ply
+    	  history_.Pop();
+    	  // If the node is terminal, get the result instead of evaluating it on the NN
+    	  // Also, if the node already cached the read the evaluation from the cache instead
+    	  // of repeating the evaluation.
+    	  if (params_.GetOutOfOrderEval() && picked_child_node.CanEvalOutOfOrder()) {
+    	    // Perform out of order eval for the last entry in minibatch_.
+    	    FetchSingleNodeResult(&picked_child_node, computation_->GetBatchSize() - 1);
+    	    {
+    	      // Nodes mutex for doing node updates.
+    	      SharedMutex::Lock lock(search_->nodes_mutex_);
+    	      DoBackupUpdateSingleNode(picked_child_node);
+    	    }
 	    
-	    // Remove last entry in minibatch_, as it has just been
-	    // processed.
-	    // If NN eval was already processed out of order, remove it.
-	    if (picked_child_node.nn_queried) computation_->PopCacheHit();
-	    minibatch_.pop_back();
-	    --minibatch_size;
-	    ++number_out_of_order;
-	  }
-	}
+    	    // Remove last entry in minibatch_, as it has just been
+    	    // processed.
+    	    // If NN eval was already processed out of order, remove it.
+    	    if (picked_child_node.nn_queried) computation_->PopCacheHit();
+    	    minibatch_.pop_back();
+    	    --minibatch_size;
+    	    ++number_out_of_order;
+    	  }
+    	}
       } else {
-	LOGFILE << "Beta to move: " << my_string;
+    	LOGFILE << "Beta to move: " << my_string;
       }
-    } // End of while
-  }
+    } 
+  } // End of while
 }
 
 // Returns node and whether there's been a search collision on the node.
