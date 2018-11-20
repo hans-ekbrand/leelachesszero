@@ -628,7 +628,7 @@ void SearchWorker::GatherMinibatch() {
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
 */
     // Pick next node to extend.
-    int npick = std::min(10, params_.GetMiniBatchSize() - minibatch_size);
+    int npick = std::min(3, params_.GetMiniBatchSize() - minibatch_size);
     bool quit = PickNodeToExtend(collisions_left, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
     if (quit) return;
 /*
@@ -842,93 +842,13 @@ bool SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_ed
     if (npick == 0 || quit) return quit;
     history_.Pop();
 
-    //~ {
-		//~ Node::Iterator best_edge;
-		//~ best_edge.Reset();  // probably not necessary
-
-		//~ // If we fall through, then n_in_flight_ has been incremented but this
-		//~ // playout remains incomplete; we must go deeper.
-		//~ float puct_mult =
-			//~ params_.GetCpuct() * std::sqrt(std::max(node->GetChildrenVisits(), 1u));
-		//~ float best = std::numeric_limits<float>::lowest();
-		//~ float second_best = std::numeric_limits<float>::lowest();
-		//~ int possible_moves = 0;
-		//~ float parent_q =
-			//~ ((is_root_node && params_.GetNoise()) || !params_.GetFpuReduction())
-				//~ ? -node->GetQ()
-				//~ : -node->GetQ() - params_.GetFpuReduction() *
-									  //~ std::sqrt(node->GetVisitedPolicy());
-
-		//~ Node::Iterator second_best_edge2;
-
-		//~ int idx2 = -1;
-		//~ for (auto child : node->Edges()) {
-	      //~ idx2++;
-	      //~ if (idx2 != idx) {
-			  //~ if (is_root_node) {
-				//~ // If there's no chance to catch up to the current best node with
-				//~ // remaining playouts, don't consider it.
-				//~ // best_move_node_ could have changed since best_node_n was retrieved.
-				//~ // To ensure we have at least one node to expand, always include
-				//~ // current best node.
-				//~ if (child != search_->best_move_edge_ &&
-					//~ search_->remaining_playouts_ <
-						//~ best_node_n - static_cast<int>(child.GetN())) {
-				  //~ continue;
-				//~ }
-				//~ // If root move filter exists, make sure move is in the list.
-				//~ if (!root_move_filter_.empty() &&
-					//~ std::find(root_move_filter_.begin(), root_move_filter_.end(),
-							  //~ child.GetMove()) == root_move_filter_.end()) {
-				  //~ continue;
-				//~ }
-				//~ ++possible_moves;
-			  //~ }
-			  //~ float Q = child.GetQ(parent_q);
-			  //~ const float score = child.GetU(puct_mult) + Q;
-			  //~ if (score > best) {
-				//~ second_best = best;
-				//~ second_best_edge = best_edge;
-				//~ second_best_edge2 = best_edge;
-				//~ best = score;
-				//~ best_edge = child;
-			  //~ } else if (score > second_best) {
-				//~ second_best = score;
-				//~ second_best_edge = child;
-				//~ second_best_edge2 = child;
-			  //~ }
-		  //~ }
-		//~ }
-
-		//~ if (second_best_edge) {
-		  //~ collision_limit = std::min(
-			  //~ collision_limit,
-			  //~ best_edge.GetVisitsToReachU(second_best, puct_mult, parent_q));
-		  //~ assert(collision_limit >= 1);
-		  //~ second_best_edge.Reset();
-		//~ }
-
-        //~ if (best > std::numeric_limits<float>::lowest()) {
-			//~ IncrementNInFlight(node, search_->root_node_, 1);
-			//~ history_.Append(best_edge.GetMove());
-			//~ if (is_root_node && possible_moves <= 1 && !search_->limits_.infinite) {
-			  //~ // If there is only one move theoretically possible within remaining time,
-			  //~ // output it.
-			  //~ Mutex::Lock counters_lock(search_->counters_mutex_);
-			  //~ search_->found_best_move_ = true;
-			//~ }
-			//~ quit = PickNodeToExtendRec(best_edge.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
-		//~ }
-	//~ }
-	
-	//~ return quit;
-
     if (second_best_edge2) {
       IncrementNInFlight(node, search_->root_node_, 1);
       history_.Append(second_best_edge2.GetMove());
-      return PickNodeToExtendRec(second_best_edge2.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
+      quit = PickNodeToExtendRec(second_best_edge2.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
+      history_.Pop();
     }
-    return false;
+    return quit;
 
 }
 
