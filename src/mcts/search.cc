@@ -628,7 +628,7 @@ void SearchWorker::GatherMinibatch() {
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
 */
     // Pick next node to extend.
-    int npick = std::min(30, params_.GetMiniBatchSize() - minibatch_size);
+    int npick = std::min(5, params_.GetMiniBatchSize() - minibatch_size);
     bool quit = PickNodeToExtend(collisions_left, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
     if (quit) return;
 /*
