@@ -867,8 +867,9 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
         }
         ++possible_moves;
       }
-      // float Q = child.GetMinQ(parent_q);
-      float Q = child.GetQ(parent_q);      
+      float Q = child.GetMinQ(parent_q);
+      if(depth % 2 == 0) { Q = -Q; }
+      // float Q = child.GetQ(parent_q);      
       const float score = child.GetU(puct_mult) + Q;
       if (score > best) {
         second_best = best;
