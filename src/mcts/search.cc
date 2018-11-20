@@ -925,6 +925,7 @@ bool SearchWorker::PickNodeToExtendRec(Node *node, Node::Iterator second_best_ed
 
     if (second_best_edge2) {
       IncrementNInFlight(node, search_->root_node_, 1);
+      history_.Append(second_best_edge2.GetMove());
       return PickNodeToExtendRec(second_best_edge2.GetOrSpawnNode(/* parent */ node), second_best_edge, false, depth, best_node_n, collision_limit, minibatch_size, collision_events_left, collisions_left, number_out_of_order, npick);
     }
     return false;
