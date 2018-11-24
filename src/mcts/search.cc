@@ -1118,7 +1118,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     // Terminal nodes don't involve the neural NetworkComputation, nor do
     // they require any further processing after value retrieval.
     node_to_process->v = node->GetQ();
-    LOGFILE << "Node " << node->DebugString() << " Not evaluated (probably a collision)";
+    // LOGFILE << "Node " << node->DebugString() << " Not evaluated (probably a collision)";
     return;
   }
   // LOGFILE << "adding Q and P to node " << node_to_process->node->DebugString() << " Q=" << -computation_->GetQVal(idx_in_computation) << " idx in computation=" << idx_in_computation;
@@ -1156,9 +1156,9 @@ void SearchWorker::DoBackupUpdate() {
 
   for (const NodeToProcess& node_to_process : minibatch_) {
     DoBackupUpdateSingleNode(node_to_process);
-    DoBackupUpdateSingleNodeMinQ(node_to_process);
+    // DoBackupUpdateSingleNodeMinQ(node_to_process);
   }
-  PropagateMinQ();
+  // PropagateMinQ();
 }
 
 void SearchWorker::DoBackupUpdateSingleNode(
