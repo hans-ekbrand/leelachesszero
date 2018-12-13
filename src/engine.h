@@ -28,7 +28,7 @@
 #pragma once
 
 #include "chess/uciloop.h"
-#include "mcts/search.h"
+#include "mcts_revamp/search.h"
 #include "neural/cache.h"
 #include "neural/network.h"
 #include "syzygy/syzygy.h"
@@ -78,7 +78,7 @@ class EngineController {
   void Stop();
   void SetCacheSize(int size);
 
-  SearchLimits PopulateSearchLimits(int ply, bool is_black,
+  SearchLimits_revamp PopulateSearchLimits(int ply, bool is_black,
                                     const GoParams& params);
 
  private:
@@ -96,8 +96,8 @@ class EngineController {
   RpSharedMutex busy_mutex_;
   using SharedLock = std::shared_lock<RpSharedMutex>;
 
-  std::unique_ptr<Search> search_;
-  std::unique_ptr<NodeTree> tree_;
+  std::unique_ptr<Search_revamp> search_;
+  std::unique_ptr<NodeTree_revamp> tree_;
   std::unique_ptr<SyzygyTablebase> syzygy_tb_;
   std::unique_ptr<Network> network_;
   NNCache cache_;

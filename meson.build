@@ -74,6 +74,8 @@ files += [
   'src/chess/uciloop.cc',
   'src/mcts/node.cc',
   'src/mcts/search.cc',
+  'src/mcts_revamp/node.cc',
+  'src/mcts_revamp/search.cc',
   'src/neural/cache.cc',
   'src/neural/encoder.cc',
   'src/neural/factory.cc',
