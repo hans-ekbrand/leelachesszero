@@ -249,30 +249,71 @@ void Node_revamp::ReleaseChildrenExceptOne(Node_revamp* node_to_save) {
 
 Node_revamp* Node_revamp::GetNextLeaf(const Node_revamp* root, PositionHistory* history) {
   Node_revamp* node = this;
-  do {
+  while (true) {
     while (true) {
       if (node == root) {
-        std::cerr << "getnextleaf restarting\n";
+//        std::cerr << "getnextleaf restarting\n";
         break;
       }
+      history->Pop();
       int nedge = node->parent_->GetNumEdges();
       if (nedge > 2) nedge = 2;
-      if (node->index_ < nedge - 1) {
-        node = node->parent_->edges_[node->index_ + 1].GetChild();
-        history->Pop();
-        history->Append(node->parent_->edges_[node->index_].GetMove());
+      int idx = node->index_ + 1;
+      node = node->parent_;
+      if (idx < nedge) {
+        history->Append(node->edges_[idx].GetMove());
+        Node_revamp* child = node->edges_[idx].GetChild();
+        if (child == nullptr) {
+          node->edges_[idx].CreateChild(node, idx);
+          return node->edges_[idx].GetChild();
+        }
+        node = child;
         break;
       }
-      node = node->parent_;
-      history->Pop();
     }
-    while (node->GetNumEdges() > 0) {
-      node = node->edges_[0].GetChild();
-      history->Append(node->parent_->edges_[0].GetMove());
+    while (!node->IsTerminal()) {
+      history->Append(node->edges_[0].GetMove());
+      Node_revamp* child = node->edges_[0].GetChild();
+      if (child == nullptr) {
+        node->edges_[0].CreateChild(node, 0);
+        return node->edges_[0].GetChild();
+      }
+      node = child;
     }
-  } while (node->IsTerminal());
+  }
   return node;
 }
+
+void Node_revamp::ExtendNode(PositionHistory* history) {
+  // We don't need the mutex because other threads will see that N=0 and
+  // N-in-flight=1 and will not touch this node.
+  const auto& board = history->Last().GetBoard();
+  auto legal_moves = board.GenerateLegalMoves();
+
+  // Check whether it's a draw/lose by position. Importantly, we must check
+  // these before doing the by-rule checks below.
+  if (legal_moves.empty()) {
+    // Could be a checkmate or a stalemate
+    if (board.IsUnderCheck()) {
+      MakeTerminal(GameResult::WHITE_WON);
+    } else {
+      MakeTerminal(GameResult::DRAW);
+    }
+    return;
+  }
+
+  // Add legal moves as edges of this node.
+  CreateEdges(legal_moves);
+  
+  //~ int nedge = node->GetNumEdges();
+  //~ if (nedge > 2) nedge = 2;
+  //~ for (int i = 0; i < nedge; i++) {
+    //~ node->GetEdges()[i].CreateChild(node, i);
+  //~ }
+
+  //~ std::cerr << "Extended node with " << nedge << " edges\n";
+}
+
 
 /////////////////////////////////////////////////////////////////////////
 // NodeTree_revamp

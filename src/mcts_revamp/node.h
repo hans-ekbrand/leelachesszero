@@ -174,6 +174,7 @@ class Node_revamp {
   Edge_revamp* GetEdgeToNode(const Node_revamp* node) const;
   
   Node_revamp* GetNextLeaf(const Node_revamp* root, PositionHistory *history);
+  void ExtendNode(PositionHistory* history);
 
   // Debug information about the node.
   std::string DebugString() const;

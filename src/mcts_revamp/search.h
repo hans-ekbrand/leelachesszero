@@ -116,7 +116,7 @@ private:
 
   Node_revamp* root_node_;
   // Fixed positions which happened before the search.
-  const PositionHistory& played_history_;
+  /*const*/ PositionHistory/*&*/ played_history_;  // not const ref so that startthreads can create top of tree so that there is a leaf for each thread
 
   const SearchLimits_revamp limits_;
   
@@ -137,7 +137,6 @@ class SearchWorker_revamp {
   void RunBlocking();
 
  private:
-  void ExtendNode(Node_revamp* node);
   void AddNodeToComputation(Node_revamp* node);
 
   Search_revamp* const search_;

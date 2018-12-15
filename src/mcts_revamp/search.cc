@@ -115,15 +115,36 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
 
 
 void Search_revamp::StartThreads(size_t how_many) {
-  Mutex::Lock lock(threads_mutex_);
-  // First thread is a watchdog thread.
-  if (threads_.size() == 0) {
-    threads_.emplace_back([this]() { WatchdogThread(); });
+  if (root_node_->GetNumEdges() > 0) {
+    std::cerr << "Tree not empty, doing nothing\n";
+    return;
   }
 
-//  std::cerr << "StartThreads\n";
-	
-//  createTree(nodetree.root);
+  std::cerr << "Letting " << how_many << " threads create " << limits_.visits << " nodes each\n";
+
+  // create enough leaves so that each thread gets its own subtree
+  int nleaf = 1;
+  Node_revamp* current_node = root_node_;
+  while (nleaf < how_many) {
+    current_node->ExtendNode(&played_history_);
+    int nedges = current_node->GetNumEdges();
+    if (nedges > 2) nedges = 2;
+    nleaf += nedges - 1;
+    current_node = current_node->GetNextLeaf(root_node_, &played_history_);
+  }
+
+  Mutex::Lock lock(threads_mutex_);
+  for (int i = 0; i < how_many; i++) {
+    threads_.emplace_back([this, current_node]()
+     {
+      SearchWorker_revamp worker(this, current_node);
+      worker.RunBlocking();
+     }
+    );
+    if (i < how_many - 1) {
+      current_node = current_node->GetNextLeaf(root_node_, &played_history_);
+    }
+  }
 }
 
 //~ bool Search_revamp::IsSearchActive() const {
@@ -132,8 +153,9 @@ void Search_revamp::StartThreads(size_t how_many) {
 //~ }
 
 void Search_revamp::WatchdogThread() {
-  SearchWorker_revamp worker(this, root_node_);
-  worker.RunBlocking();
+  //~ SearchWorker_revamp worker(this, root_node_);
+  //~ worker.RunBlocking();
+
   //~ while (IsSearchActive()) {
     //~ {
       //~ using namespace std::chrono_literals;
@@ -161,21 +183,6 @@ void Search_revamp::WatchdogThread() {
 }
 
 
-//~ void Search_revamp::CreateTree(Node_revamp *node) {
-	//~ if (node == nullptr) {
-		//~ nodetree.root = CreateNode(nullptr);
-	//~ } else {
-		//~ if has child
-		 //~ for each child
-		  //~ append history with move
-		  //~ recursive call on child
-		//~ else has no children
-		 //~ for each move
-		 
-		  
-	//~ }
-//~ }
-
 /*
 void Search_revamp::RunBlocking(size_t threads) {
 }
@@ -194,6 +201,11 @@ void Search_revamp::Abort() {
 */
 
 void Search_revamp::Wait() {
+  Mutex::Lock lock(threads_mutex_);
+  while (!threads_.empty()) {
+    threads_.back().join();
+    threads_.pop_back();
+  }
 }
 
 /*
@@ -206,33 +218,6 @@ std::pair<Move, Move> Search_revamp::GetBestMove() const {
 }
 
 */
-
-//~ Node_revamp* Search_revamp::CreateNode(Node_revamp* parent) {
-  //~ auto node = std::make_unique<Node>(parent);
-
-  //~ const auto& board = history_.Last().GetBoard();
-  //~ auto legal_moves = board.GenerateLegalMoves();
-
-  //~ // Add legal moves as edges of this node.
-  //~ node->CreateEdges(legal_moves);
-  
-  //~ return node;
-//~ }
-
-// Node must exist and have edges (legal moves computed)
-//~ void Search_revamp::AddNodeToComputation(Node_revamp* node) {
-  //~ auto hash = history_.HashLast(kCacheHistoryLength + 1);
-  //~ auto planes = EncodePositionForNN(history_, 8);
-
-  //~ std::vector<uint16_t> moves;
-
-  //~ // Legal moves are known, use them.
-  //~ for (auto edge : node->Edges()) {
-    //~ moves.emplace_back(edge.GetMove().as_nn_index());
-  //~ }
-
-  //~ computation_->AddInput(hash, std::move(planes), std::move(moves));
-//~ }
 
 
 Search_revamp::~Search_revamp() {
@@ -247,7 +232,9 @@ Search_revamp::~Search_revamp() {
 
 
 void SearchWorker_revamp::RunBlocking() {
-  Node_revamp *current_node_ = worker_root_;
+  std::cerr << "Running thread for node " << worker_root_ << "\n";
+  
+  Node_revamp *current_node = worker_root_;
   int lim = search_->limits_.visits;
 
   const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
@@ -255,41 +242,11 @@ void SearchWorker_revamp::RunBlocking() {
     //~ if (current_node_ == nullptr) {
       //~ std::cerr << "current_node_ is null\n";
     //~ }
-    ExtendNode(current_node_);
-    current_node_ = current_node_->GetNextLeaf(worker_root_, &history_);
+    current_node->ExtendNode(&history_);
+    current_node = current_node->GetNextLeaf(worker_root_, &history_);
   }
   int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
-  std::cerr << "Elapsed time for " << lim << " nodes: " << elapsed_time << "ms\n";
-}
-
-void SearchWorker_revamp::ExtendNode(Node_revamp* node) {
-  // We don't need the mutex because other threads will see that N=0 and
-  // N-in-flight=1 and will not touch this node.
-  const auto& board = history_.Last().GetBoard();
-  auto legal_moves = board.GenerateLegalMoves();
-
-  // Check whether it's a draw/lose by position. Importantly, we must check
-  // these before doing the by-rule checks below.
-  if (legal_moves.empty()) {
-    // Could be a checkmate or a stalemate
-    if (board.IsUnderCheck()) {
-      node->MakeTerminal(GameResult::WHITE_WON);
-    } else {
-      node->MakeTerminal(GameResult::DRAW);
-    }
-    return;
-  }
-
-  // Add legal moves as edges of this node.
-  node->CreateEdges(legal_moves);
-  
-  int nedge = node->GetNumEdges();
-  if (nedge > 2) nedge = 2;
-  for (int i = 0; i < nedge; i++) {
-    node->GetEdges()[i].CreateChild(node, i);
-  }
-
-  //~ std::cerr << "Extended node with " << nedge << " edges\n";
+  std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished: " << elapsed_time << "ms\n";
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
