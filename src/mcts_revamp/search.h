@@ -40,6 +40,7 @@
 #include "utils/optional.h"
 #include "utils/optionsdict.h"
 #include "utils/optionsparser.h"
+#include "utils/logging.h"
 
 namespace lczero {
 

@@ -259,8 +259,9 @@ void SearchWorker_revamp::RunBlocking() {
       current_node = current_node->GetNextLeaf(worker_root_, &history_);
       i++;
     }
-
+    LOGFILE << "About to run ComputeBlocking()";
     computation_->ComputeBlocking();
+    LOGFILE << "ComputeBlocking() finished";    
     ic += search_->kMiniBatchSize;
 
     for (int j = 0; j < search_->kMiniBatchSize; j++) {
