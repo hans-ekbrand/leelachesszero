@@ -26,6 +26,7 @@
 */
 
 #include "mcts_revamp/search.h"
+#include "neural/encoder.h"
 
 namespace lczero {
 
@@ -90,13 +91,13 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ cache_(cache),
       //~ syzygy_tb_(syzygy_tb),
       played_history_(tree.GetPositionHistory()),
-      //~ network_(network),
-      limits_(limits)
+      network_(network),
+      limits_(limits),
       //~ start_time_(std::chrono::steady_clock::now()),
       //~ initial_visits_(root_node_->GetN()),
       //~ best_move_callback_(best_move_callback),
       //~ info_callback_(info_callback),
-      //~ kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr)),
+      kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr))
       //~ kMaxPrefetchBatch(options.Get<int>(kMaxPrefetchBatchStr)),
       //~ kCpuct(options.Get<float>(kCpuctStr)),
       //~ kTemperature(options.Get<float>(kTemperatureStr)),
@@ -106,7 +107,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ kVerboseStats(options.Get<bool>(kVerboseStatsStr)),
       //~ kAggressiveTimePruning(options.Get<float>(kAggressiveTimePruningStr)),
       //~ kFpuReduction(options.Get<float>(kFpuReductionStr)),
-      //~ kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr)),
+      //~ kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr))
       //~ kPolicySoftmaxTemp(options.Get<float>(kPolicySoftmaxTempStr)),
       //~ kAllowedNodeCollisions(options.Get<int>(kAllowedNodeCollisionsStr)),
       //~ kOutOfOrderEval(options.Get<bool>(kOutOfOrderEvalStr)),
@@ -125,7 +126,7 @@ void Search_revamp::StartThreads(size_t how_many) {
   // create enough leaves so that each thread gets its own subtree
   int nleaf = 1;
   Node_revamp* current_node = root_node_;
-  while (nleaf < how_many) {
+  while (nleaf < (int)how_many) {
     current_node->ExtendNode(&played_history_);
     int nedges = current_node->GetNumEdges();
     if (nedges > 2) nedges = 2;
@@ -134,14 +135,14 @@ void Search_revamp::StartThreads(size_t how_many) {
   }
 
   Mutex::Lock lock(threads_mutex_);
-  for (int i = 0; i < how_many; i++) {
+  for (int i = 0; i < (int)how_many; i++) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
       worker.RunBlocking();
      }
     );
-    if (i < how_many - 1) {
+    if (i < (int)how_many - 1) {
       current_node = current_node->GetNextLeaf(root_node_, &played_history_);
     }
   }
@@ -233,23 +234,71 @@ Search_revamp::~Search_revamp() {
 
 void SearchWorker_revamp::RunBlocking() {
   std::cerr << "Running thread for node " << worker_root_ << "\n";
-  
+
   Node_revamp *current_node = worker_root_;
   int lim = search_->limits_.visits;
 
   const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
-  for (int i = 0; i < lim; i++) {
-    //~ if (current_node_ == nullptr) {
-      //~ std::cerr << "current_node_ is null\n";
-    //~ }
-    current_node->ExtendNode(&history_);
-    current_node = current_node->GetNextLeaf(worker_root_, &history_);
+  int i = 0, ic = 0;
+  Node_revamp** minibatch = new Node_revamp *[search_->kMiniBatchSize];
+  int const MAXNEDGE = 100;
+  float pval[MAXNEDGE];
+  while (i < lim) {
+    computation_ = search_->network_->NewComputation();
+
+    for (int j = 0; j < search_->kMiniBatchSize;) {
+      //~ if (current_node_ == nullptr) {
+        //~ std::cerr << "current_node_ is null\n";
+      //~ }
+      current_node->ExtendNode(&history_);
+      if (!current_node->IsTerminal()) {
+        AddNodeToComputation(current_node);
+        minibatch[j] = current_node;
+        j++;
+      }
+      current_node = current_node->GetNextLeaf(worker_root_, &history_);
+      i++;
+    }
+
+    computation_->ComputeBlocking();
+    ic += search_->kMiniBatchSize;
+
+    for (int j = 0; j < search_->kMiniBatchSize; j++) {
+      Node_revamp* node = minibatch[j];
+      node->SetQ(-computation_->GetQVal(j));  // should it be negated?
+      float total = 0.0;
+      int nedge = node->GetNumEdges();
+      if (nedge > MAXNEDGE) {
+        std::cerr << "Too many edges\n";
+        nedge = MAXNEDGE;
+      }
+      for (int k = 0; k < nedge; k++) {
+        float p = computation_->GetPVal(j, node->edges_[k].GetMove().as_nn_index());
+        pval[k] = p;
+        total += p;
+      }
+      float scale = total > 0.0f ? 1.0f / total : 0.0f;
+      for (int k = 0; k < nedge; k++) {
+        node->edges_[k].SetP(pval[k] * scale);
+      }
+    }
   }
   int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
-  std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished: " << elapsed_time << "ms\n";
+  std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished " << i << " nodes and " << ic << " computations: " << elapsed_time << "ms\n";
+
+  delete [] minibatch;
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
+//  auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
+  auto planes = EncodePositionForNN(history_, 8);
+//  std::vector<uint16_t> moves;
+//  int nedge = node->GetNumEdges();
+//  for (int k = 0; k < nedge; k++) {
+//    moves.emplace_back(node->edges_[k].GetMove().as_nn_index());
+//  }
+//  computation_->AddInput(hash, std::move(planes), std::move(moves));
+  computation_->AddInput(std::move(planes));
 }
 
 }  // namespace lczero

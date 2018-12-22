@@ -118,11 +118,16 @@ private:
   // Fixed positions which happened before the search.
   /*const*/ PositionHistory/*&*/ played_history_;  // not const ref so that startthreads can create top of tree so that there is a leaf for each thread
 
+  Network* const network_;
   const SearchLimits_revamp limits_;
-  
+
+  // External parameters
+  const int kMiniBatchSize;
+//  const int kCacheHistoryLength;
+
   friend class SearchWorker_revamp;
 
-//  void AddNodeToComputation(Node_revamp* node);
+  void AddNodeToComputation(Node_revamp* node);
 };
 
 // Single thread worker of the search engine.
@@ -140,7 +145,7 @@ class SearchWorker_revamp {
   void AddNodeToComputation(Node_revamp* node);
 
   Search_revamp* const search_;
-//  std::unique_ptr<Computation> computation_;
+  std::unique_ptr<NetworkComputation> computation_;
   // History is reset and extended by PickNodeToExtend().
   PositionHistory history_;
 

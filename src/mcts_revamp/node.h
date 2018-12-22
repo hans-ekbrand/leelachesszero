@@ -101,7 +101,7 @@ class Edge_revamp {
   // i.e. black's e7e5 is stored as e2e4.
   // Root node contains move a1a1.
   Move move_;
-  
+
   // Pointer to child of this edge. nullptr for no node.
   std::unique_ptr<Node_revamp> child_ = nullptr;
 
@@ -149,6 +149,8 @@ class Node_revamp {
   // for terminal nodes.
   float GetQ() const { return q_; }
 
+  void SetQ(float q) { q_ = q; }
+
   // Returns whether the node is known to be draw/lose/win.
   bool IsTerminal() const { return is_terminal_; }
   uint16_t GetNumEdges() const { return edges_.size(); }
@@ -172,14 +174,14 @@ class Node_revamp {
 
   // For a child node, returns corresponding edge.
   Edge_revamp* GetEdgeToNode(const Node_revamp* node) const;
-  
+
   Node_revamp* GetNextLeaf(const Node_revamp* root, PositionHistory *history);
   void ExtendNode(PositionHistory* history);
 
   // Debug information about the node.
   std::string DebugString() const;
 
- private:
+ //private:  edges should be private but SearchWorker iterates over it and there is no iterator
   // To minimize the number of padding bytes and to avoid having unnecessary
   // padding when new fields are added, we arrange the fields by size, largest
   // to smallest.
@@ -188,6 +190,7 @@ class Node_revamp {
   // only 10 are real! Maybe even merge it into this class??
   EdgeList_revamp edges_;
 
+ private:
   // 8 byte fields.
   // Pointer to a parent node. nullptr for the root.
   Node_revamp* parent_ = nullptr;
