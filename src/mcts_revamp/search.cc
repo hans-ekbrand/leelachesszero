@@ -278,8 +278,8 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    LOGFILE << "RunNNComputation START";
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    LOGFILE << "RunNNComputation START ";
     start_comp_time_ = std::chrono::steady_clock::now();
 
     computation_->ComputeBlocking();
@@ -287,13 +287,13 @@ void SearchWorker_revamp::RunBlocking() {
 
     stop_comp_time_ = std::chrono::steady_clock::now();
     auto duration = stop_comp_time_ - start_comp_time_;
-    LOGFILE << "RunNNComputation STOP " << duration.count() << " ";
+    LOGFILE << "RunNNComputation STOP nanoseconds used: " << duration.count() << "; ";
     int idx_in_computation = search_->kMiniBatchSize;
     int duration_mu = duration.count();
     if(duration_mu > 0){
       float better_duration = duration_mu / 1000;
       float nps = 1000 * idx_in_computation / better_duration;
-      LOGFILE << "nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps;
+      LOGFILE << " nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps << "\n";
     }
 
     for (int j = 0; j < search_->kMiniBatchSize; j++) {
