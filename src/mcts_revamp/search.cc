@@ -26,9 +26,23 @@
 */
 
 #include "mcts_revamp/search.h"
+
+#include <iostream>
+#include <fstream>
+
 #include "neural/encoder.h"
 
 namespace lczero {
+
+namespace {
+
+  std::chrono::steady_clock::time_point start_comp_time_;
+  std::chrono::steady_clock::time_point stop_comp_time_;
+
+  const char* LOGFILENAME = "lc0.log";
+  std::ofstream LOGFILE;
+
+}  // namespace
 
 const char* Search_revamp::kMiniBatchSizeStr = "Minibatch size for NN inference";
 const char* Search_revamp::kMaxPrefetchBatchStr = "Max prefetch nodes, per NN call";
@@ -123,6 +137,8 @@ void Search_revamp::StartThreads(size_t how_many) {
 
   std::cerr << "Letting " << how_many << " threads create " << limits_.visits << " nodes each\n";
 
+  LOGFILE.open(LOGFILENAME);
+
   // create enough leaves so that each thread gets its own subtree
   int nleaf = 1;
   Node_revamp* current_node = root_node_;
@@ -207,6 +223,8 @@ void Search_revamp::Wait() {
     threads_.back().join();
     threads_.pop_back();
   }
+
+  LOGFILE.close();
 }
 
 /*
@@ -260,8 +278,28 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
+LOGFILE << "RunNNComputation START";
+// start_comp_time_ = std::chrono::high_resolution_clock::now();
+start_comp_time_ = std::chrono::steady_clock::now();
+
     computation_->ComputeBlocking();
     ic += search_->kMiniBatchSize;
+
+// stop_comp_time_ = std::chrono::high_resolution_clock::now();
+stop_comp_time_ = std::chrono::steady_clock::now();
+ auto duration = stop_comp_time_ - start_comp_time_;
+ // std::chrono::duration<long, std::micro> duration = stop_comp_time_ - start_comp_time_;
+ LOGFILE << "RunNNComputation STOP " << duration.count() << " ";
+
+  int idx_in_computation = search_->kMiniBatchSize;
+
+//  auto duration = stop_comp_time_ - start_comp_time_;
+  int duration_mu = duration.count();
+  if(duration_mu > 0){
+    float better_duration = duration_mu / 1000;
+    float nps = 1000 * idx_in_computation / better_duration;
+    LOGFILE << "nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps;
+  }
 
     for (int j = 0; j < search_->kMiniBatchSize; j++) {
       Node_revamp* node = minibatch[j];
