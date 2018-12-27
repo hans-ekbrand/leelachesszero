@@ -278,7 +278,7 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    std::this_thread::sleep_for(std::chrono::milliseconds(73)); // optimised for 1060
     LOGFILE << "RunNNComputation START ";
     start_comp_time_ = std::chrono::steady_clock::now();
 
