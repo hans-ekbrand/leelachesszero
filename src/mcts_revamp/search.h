@@ -121,9 +121,11 @@ private:
   Network* const network_;
   const SearchLimits_revamp limits_;
 
+  NNCache* cache_;
+
   // External parameters
   const int kMiniBatchSize;
-//  const int kCacheHistoryLength;
+  const int kCacheHistoryLength;
 
   friend class SearchWorker_revamp;
 
@@ -152,7 +154,7 @@ class SearchWorker_revamp {
   std::vector<Node_revamp *> minibatch_;
   std::vector<float> weights_;
   std::vector<float> pvals_;
-  std::unique_ptr<NetworkComputation> computation_;
+  std::unique_ptr<CachingComputation> computation_;
   // History is reset and extended by PickNodeToExtend().
   PositionHistory history_;
 
