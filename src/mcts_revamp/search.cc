@@ -29,6 +29,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <math.h>
 
 #include "neural/encoder.h"
 
@@ -155,7 +156,8 @@ void Search_revamp::StartThreads(size_t how_many) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
-      worker.RunBlocking();
+//      worker.RunBlocking();
+      worker.RunBlocking2();
      }
     );
     if (i < (int)how_many - 1) {
@@ -278,28 +280,28 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-LOGFILE << "RunNNComputation START";
-// start_comp_time_ = std::chrono::high_resolution_clock::now();
-start_comp_time_ = std::chrono::steady_clock::now();
+    LOGFILE << "RunNNComputation START";
+    // start_comp_time_ = std::chrono::high_resolution_clock::now();
+    start_comp_time_ = std::chrono::steady_clock::now();
 
     computation_->ComputeBlocking();
     ic += search_->kMiniBatchSize;
 
-// stop_comp_time_ = std::chrono::high_resolution_clock::now();
-stop_comp_time_ = std::chrono::steady_clock::now();
- auto duration = stop_comp_time_ - start_comp_time_;
- // std::chrono::duration<long, std::micro> duration = stop_comp_time_ - start_comp_time_;
- LOGFILE << "RunNNComputation STOP " << duration.count() << " ";
+    // stop_comp_time_ = std::chrono::high_resolution_clock::now();
+    stop_comp_time_ = std::chrono::steady_clock::now();
+    auto duration = stop_comp_time_ - start_comp_time_;
+    // std::chrono::duration<long, std::micro> duration = stop_comp_time_ - start_comp_time_;
+    LOGFILE << "RunNNComputation STOP " << duration.count() << " ";
 
-  int idx_in_computation = search_->kMiniBatchSize;
+    int idx_in_computation = search_->kMiniBatchSize;
 
 //  auto duration = stop_comp_time_ - start_comp_time_;
-  int duration_mu = duration.count();
-  if(duration_mu > 0){
-    float better_duration = duration_mu / 1000;
-    float nps = 1000 * idx_in_computation / better_duration;
-    LOGFILE << "nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps;
-  }
+    int duration_mu = duration.count();
+    if(duration_mu > 0){
+      float better_duration = duration_mu / 1000;
+      float nps = 1000 * idx_in_computation / better_duration;
+      LOGFILE << "nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps;
+    }
 
     for (int j = 0; j < search_->kMiniBatchSize; j++) {
       Node_revamp* node = minibatch[j];
@@ -311,13 +313,13 @@ stop_comp_time_ = std::chrono::steady_clock::now();
         nedge = MAXNEDGE;
       }
       for (int k = 0; k < nedge; k++) {
-        float p = computation_->GetPVal(j, node->edges_[k].GetMove().as_nn_index());
+        float p = computation_->GetPVal(j, (node->GetEdges())[k].GetMove().as_nn_index());
         pval[k] = p;
         total += p;
       }
       float scale = total > 0.0f ? 1.0f / total : 0.0f;
       for (int k = 0; k < nedge; k++) {
-        node->edges_[k].SetP(pval[k] * scale);
+        (node->GetEdges())[k].SetP(pval[k] * scale);
       }
     }
   }
@@ -325,6 +327,247 @@ stop_comp_time_ = std::chrono::steady_clock::now();
   std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished " << i << " nodes and " << ic << " computations: " << elapsed_time << "ms\n";
 
   delete [] minibatch;
+}
+
+// computes weights for the children based on average Qs (and possibly Ps) and, if there are unexpanded edges, a weight for the first unexpanded edge (the unexpanded with highest P)
+// weights are >= 0, sum of weights is 1
+// stored in weights_, idx corresponding to index in EdgeList
+// for now, weights are simply normalized Ps
+void SearchWorker_revamp::computeWeights(Node_revamp* node) {
+  double sum = 0.0;
+  int n = node->GetNumChildren() + 1;
+  if (n > node->GetNumEdges()) n = node->GetNumEdges();
+
+  int widx = weights_.size();
+
+  for (int i = 0; i < n; i++) {
+//    weights_.push_back(1.0);
+    weights_.push_back((node->GetEdges())[i].GetP());
+    sum += weights_[widx + i];
+  }
+  if (sum > 0.0) {
+    float scale = (float)(1.0 / sum);
+    for (int i = 0; i < n; i++) {
+      weights_[widx + i] *= scale;
+    }
+  } else {
+    float x = 1.0f / (float)n;
+    for (int i = 0; i < n; i++) {
+      weights_[widx + i] = x;
+    }
+  }
+}
+
+// returns number of nodes added in sub tree root at current_node
+int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes) {
+  
+  bool const DEBUG = false;
+  
+  int orig_noof_nodes = noof_nodes;
+  
+  int widx = weights_.size();
+  computeWeights(current_node);
+  int ntot = current_node->GetN() - 1;
+  int ntotafter = ntot + noof_nodes;
+  int npos = 0;
+  double weightpos = 0.0;
+  for (int i = 0; i < current_node->GetNumChildren(); i++) {
+    int n = (current_node->GetEdges())[i].GetChild()->GetN();
+    if ((double)ntotafter * (double)weights_[widx + i] - (double)n > 0.0) {
+      npos += n;
+      weightpos += (double)weights_[widx + i];
+    } else {
+      weights_[widx + i] = 0.0;
+    }
+  }
+  
+  
+  if (DEBUG) {
+    std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
+    for (int i = widx; i < weights_.size(); i++) {
+      std::cerr << " " << weights_[i];
+    }
+    std::cerr << "\n";
+    for (int i = 0; i < current_node->GetNumChildren(); i++) {
+      std::cerr << " " << (current_node->GetEdges())[i].GetChild()->GetN();
+    }
+    std::cerr << "\n";
+  }
+  
+  int nnewnodes = 0;
+  if (weights_.size() - widx > current_node->GetNumChildren()) {  // there is an unexpanded edge to potentially extend
+    int idx = current_node->GetNumChildren();
+    double w = (double)weights_[widx + idx];
+    int ai = round((double)(npos + noof_nodes) * w / (w + weightpos));
+    if (ai >= 1) {
+
+      if (DEBUG) std::cerr << "Creating child\n";
+
+      (current_node->GetEdges())[idx].CreateChild(current_node, idx);
+      nnewnodes++;
+      Node_revamp* newchild = (current_node->GetEdges())[idx].GetChild();
+      history_.Append((current_node->GetEdges())[idx].GetMove());
+      newchild->ExtendNode(&history_);
+      if (!newchild->IsTerminal()) {
+        AddNodeToComputation(newchild);
+        minibatch_.push_back(newchild);
+
+        if (DEBUG) std::cerr << "Adding child to batch\n";
+
+        noof_nodes--;  // could alternatively be noof_nodes -= ai but that would mean more frequent under full batches
+      }
+      history_.Pop();
+    }
+    weights_.pop_back();
+  }
+  
+  if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
+  
+  for (int i = 0; i < weights_.size() - widx; i++) {
+    double w = (double)weights_[widx + i];
+    if (w > 0.0) {
+      int n = (current_node->GetEdges())[i].GetChild()->GetN();
+      int ai = round((double)(npos + noof_nodes) * w / weightpos - (double)n);
+
+      if (DEBUG) std::cerr << "Child " << i << ", ai: " << ai << "\n";
+      
+      //~ if (ai < 0) {
+        //~ std::cerr << "ai: " << ai << "\n";
+      //~ }
+
+      if (ai >= 1) {
+        history_.Append((current_node->GetEdges())[i].GetMove());
+
+        if (DEBUG) std::cerr << "rec call\n";
+
+        nnewnodes += pickNodesToExtend((current_node->GetEdges())[i].GetChild(), ai);
+        history_.Pop();
+
+        if (DEBUG) std::cerr << "return rec call\n";
+
+        noof_nodes -= ai;  // could alternatively be result of pickNodesToExtend call but this would favor later edges
+      }
+      npos -= n;
+      weightpos -= w;
+    }
+  }
+  
+  // noof_nodes unchanged if sub tree is exhausted (node has no edges (terminal) or all unexpanded descendants are terminal)
+  // noof_nodes > 0 if not enough nodes were added to children or no children and new child is terminal
+
+  for (int n = weights_.size() - widx; n > 0; n--) {
+    weights_.pop_back();
+  }
+
+  if (weights_.size() != widx) {
+    std::cerr << "weights_.size() != widx\n";
+  }
+
+  current_node->IncreaseN(nnewnodes);
+
+  if (nnewnodes > orig_noof_nodes) {
+    std::cerr << "new nodes: " << nnewnodes << ", should be: " << orig_noof_nodes << "\n";
+  }
+
+  return nnewnodes;
+}
+
+void SearchWorker_revamp::retrieveNNResult(Node_revamp* node, int batchidx) {
+  node->SetQ(-computation_->GetQVal(batchidx));  // should it be negated?
+
+  float total = 0.0;
+  int nedge = node->GetNumEdges();
+  pvals_.clear();
+  for (int k = 0; k < nedge; k++) {
+    float p = computation_->GetPVal(batchidx, (node->GetEdges())[k].GetMove().as_nn_index());
+    if (p < 0.0) {
+      std::cerr << "p value < 0\n";
+      p = 0.0;
+    }
+    pvals_.push_back(p);
+    total += p;
+  }
+  if (total > 0.0f) {
+    float scale = 1.0f / total;
+    for (int k = 0; k < nedge; k++) {
+      (node->GetEdges())[k].SetP(pvals_[k] * scale);
+    }
+    node->SortEdgesByPValue();
+  } else {
+    float x = 1.0f / (float)nedge;
+    for (int k = 0; k < nedge; k++) {
+      (node->GetEdges())[k].SetP(x);
+    }
+  }
+}
+
+void SearchWorker_revamp::RunBlocking2() {
+  std::cerr << "Running thread for node " << worker_root_ << "\n";
+  const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
+
+  worker_root_->ExtendNode(&history_);
+  if (worker_root_->IsTerminal()) {
+    std::cerr << "Root " << worker_root_ << " is terminal, nothing to do\n";
+    return;
+  }
+  minibatch_.clear();
+  computation_ = search_->network_->NewComputation();
+  AddNodeToComputation(worker_root_);
+  std::cerr << "Computing thread root ..";
+  computation_->ComputeBlocking();
+  std::cerr << " done\n";
+  retrieveNNResult(worker_root_, 0);
+
+  int lim = search_->limits_.visits;
+
+  int i = 1;
+
+  while (i < lim) {
+    minibatch_.clear();
+    computation_ = search_->network_->NewComputation();
+
+    //~ std::cerr << "n: " << worker_root_->GetN() << "\n";
+
+    pickNodesToExtend(worker_root_, search_->kMiniBatchSize);
+
+    //~ std::cerr << "weights_.size(): " << weights_.size() << "\n";
+    
+    std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
+
+    computation_->ComputeBlocking();
+    
+    std::cerr << " done\n";
+
+    i += minibatch_.size();  // == computation_->GetBatchSize()
+    
+    for (int j = 0; j < minibatch_.size(); j++) {
+      retrieveNNResult(minibatch_[j], j);
+    }
+  }
+
+  int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+  std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished " << worker_root_->GetN() << " nodes and " << i << " computations: " << elapsed_time << "ms\n";
+
+  std::cerr << "n: " << worker_root_->GetN() << "\n";
+
+  float totp = 0.0;
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (worker_root_->GetEdges())[i].GetP();
+    totp += (worker_root_->GetEdges())[i].GetP();
+  }
+  std::cerr << "\n";
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (worker_root_->GetEdges())[i].GetP() / totp;
+  }
+  std::cerr << "\n";
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (worker_root_->GetEdges())[i].GetChild()->GetN();
+  }
+  std::cerr << "\n";
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (float)(worker_root_->GetEdges())[i].GetChild()->GetN() / (float)(worker_root_->GetN() - 1);
+  }
+  std::cerr << "\n";
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {

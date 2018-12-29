@@ -140,11 +140,18 @@ class SearchWorker_revamp {
 
   // Runs iterations while needed.
   void RunBlocking();
+  void RunBlocking2();
 
  private:
   void AddNodeToComputation(Node_revamp* node);
+  void computeWeights(Node_revamp* node);
+  int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
+  void retrieveNNResult(Node_revamp* node, int batchidx);
 
   Search_revamp* const search_;
+  std::vector<Node_revamp *> minibatch_;
+  std::vector<float> weights_;
+  std::vector<float> pvals_;
   std::unique_ptr<NetworkComputation> computation_;
   // History is reset and extended by PickNodeToExtend().
   PositionHistory history_;

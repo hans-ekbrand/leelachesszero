@@ -114,6 +114,11 @@ Move Edge_revamp::GetMove(bool as_opponent) const {
   return m;
 }
 
+void Edge_revamp::CreateChild(Node_revamp* parent, uint16_t index) {
+  child_ = std::make_unique<Node_revamp>(parent, index); parent->noofchildren_++;
+}
+
+
 // Policy priors (P) are stored in a compressed 16-bit format.
 //
 // Source values are 32-bit floats:
@@ -207,6 +212,29 @@ void Node_revamp::CreateEdges(const MoveList& moves) {
   edges_ = EdgeList_revamp(moves);
 }
 
+// assumes child_ to be nullptr
+void Node_revamp::SortEdgesByPValue() {
+  int n = edges_.size();
+  for (int i = 0; i < n - 1; i++) {
+    float best = edges_[i].GetP();
+    int bestidx = i;
+    for (int j = i + 1; j < n; j++) {
+      if (edges_[j].GetP() > best) {
+        best = edges_[j].GetP();
+        bestidx = j;
+      }
+    }
+    if (bestidx != i) {
+      Move tmpmove = edges_[bestidx].move_;
+      edges_[bestidx].move_ = edges_[i].move_;
+      edges_[bestidx].SetP(edges_[i].GetP());
+      edges_[i].move_ = tmpmove;
+      edges_[i].SetP(best);
+    }
+  }
+}
+
+
 Edge_revamp* Node_revamp::GetEdgeToNode(const Node_revamp* node) const {
   assert(node->parent_ == this);
   assert(node->index_ < edges_.size());
@@ -281,7 +309,7 @@ Node_revamp* Node_revamp::GetNextLeaf(const Node_revamp* root, PositionHistory* 
       node = child;
     }
   }
-  return node;
+//  return node;  // never happens
 }
 
 void Node_revamp::ExtendNode(PositionHistory* history) {

@@ -40,39 +40,6 @@
 namespace lczero {
 
 
-// Children of a node are stored the following way:
-// * Edges and Nodes edges point to are stored separately.
-// * There may be dangling edges (which don't yet point to any Node_revamp object yet)
-// * Edges are stored are a simple array on heap.
-// * Nodes are stored as a linked list, and contain index_ field which shows
-//   which edge of a parent that node points to.
-//
-// Example:
-//                                Parent Node_revamp
-//                                    |
-//        +-------------+-------------+----------------+--------------+
-//        |              |            |                |              |
-//   Edge_revamp 0(Nf3)    Edge_revamp 1(Bc5)     Edge_revamp 2(a4)     Edge_revamp 3(Qxf7)    Edge_revamp 4(a3)
-//    (dangling)         |           (dangling)        |           (dangling)
-//                   Node_revamp, Q=0.5                    Node_revamp, Q=-0.2
-//
-//  Is represented as:
-// +--------------+
-// | Parent Node_revamp  |
-// +--------------+                                        +--------+
-// | edges_       | -------------------------------------> | Edge_revamp[] |
-// |              |    +------------+                      +--------+
-// | child_       | -> | Node_revamp       |                      | Nf3    |
-// +--------------+    +------------+                      | Bc5    |
-//                     | index_ = 1 |                      | a4     |
-//                     | q_ = 0.5   |    +------------+    | Qxf7   |
-//                     | sibling_   | -> | Node_revamp       |    | a3     |
-//                     +------------+    +------------+    +--------+
-//                                       | index_ = 3 |
-//                                       | q_ = -0.2  |
-//                                       | sibling_   | -> nullptr
-//                                       +------------+
-
 class Node_revamp;
 class Edge_revamp {
  public:
@@ -86,7 +53,7 @@ class Edge_revamp {
   void SetP(float val);
 
   Node_revamp* GetChild() { return child_.get(); }
-  void CreateChild(Node_revamp* parent, uint16_t index) { child_ = std::make_unique<Node_revamp>(parent, index); }
+  void CreateChild(Node_revamp* parent, uint16_t index);
 
   void ReleaseChild();
   void ReleaseChildIfIsNot(Node_revamp* node_to_save);
@@ -110,6 +77,7 @@ class Edge_revamp {
   uint16_t p_ = 0;
 
   friend class EdgeList_revamp;
+  friend class Node_revamp;
 };
 
 // Array of Edges.
@@ -138,6 +106,8 @@ class Node_revamp {
 
   // Creates edges from a movelist. There has to be no edges before that.
   void CreateEdges(const MoveList& moves);
+  
+  void SortEdgesByPValue();
 
   // Gets parent node.
   Node_revamp* GetParent() const { return parent_; }
@@ -154,7 +124,11 @@ class Node_revamp {
   // Returns whether the node is known to be draw/lose/win.
   bool IsTerminal() const { return is_terminal_; }
   uint16_t GetNumEdges() const { return edges_.size(); }
+  uint16_t GetNumChildren() const { return noofchildren_; }
   Edge_revamp* GetEdges() { return edges_.get(); }
+  
+  uint32_t GetN() const { return n_; }
+  void IncreaseN(uint32_t dn) { n_ += dn; }
 
   // Makes the node terminal and sets it's score.
   void MakeTerminal(GameResult result);
@@ -181,7 +155,7 @@ class Node_revamp {
   // Debug information about the node.
   std::string DebugString() const;
 
- //private:  edges should be private but SearchWorker iterates over it and there is no iterator
+ private:
   // To minimize the number of padding bytes and to avoid having unnecessary
   // padding when new fields are added, we arrange the fields by size, largest
   // to smallest.
@@ -190,7 +164,6 @@ class Node_revamp {
   // only 10 are real! Maybe even merge it into this class??
   EdgeList_revamp edges_;
 
- private:
   // 8 byte fields.
   // Pointer to a parent node. nullptr for the root.
   Node_revamp* parent_ = nullptr;
@@ -202,9 +175,13 @@ class Node_revamp {
   // perspective of the player-to-move for the position.
   float q_ = 0.0f;
 
+  uint32_t n_ = 1;
+
   // 2 byte fields.
   // Index of this node is parent's edge list.
   uint16_t index_;
+  
+  uint16_t noofchildren_ = 0;
 
   // 1 byte fields.
   // Whether or not this node end game (with a winning of either sides or draw).
