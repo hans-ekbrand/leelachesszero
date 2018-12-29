@@ -103,7 +103,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
                SyzygyTablebase* syzygy_tb)
     :
       root_node_(tree.GetCurrentHead()),
-      //~ cache_(cache),
+      cache_(cache),
       //~ syzygy_tb_(syzygy_tb),
       played_history_(tree.GetPositionHistory()),
       network_(network),
@@ -112,7 +112,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ initial_visits_(root_node_->GetN()),
       //~ best_move_callback_(best_move_callback),
       //~ info_callback_(info_callback),
-      kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr))
+      kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr)),
       //~ kMaxPrefetchBatch(options.Get<int>(kMaxPrefetchBatchStr)),
       //~ kCpuct(options.Get<float>(kCpuctStr)),
       //~ kTemperature(options.Get<float>(kTemperatureStr)),
@@ -122,7 +122,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ kVerboseStats(options.Get<bool>(kVerboseStatsStr)),
       //~ kAggressiveTimePruning(options.Get<float>(kAggressiveTimePruningStr)),
       //~ kFpuReduction(options.Get<float>(kFpuReductionStr)),
-      //~ kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr))
+      kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr))
       //~ kPolicySoftmaxTemp(options.Get<float>(kPolicySoftmaxTempStr)),
       //~ kAllowedNodeCollisions(options.Get<int>(kAllowedNodeCollisionsStr)),
       //~ kOutOfOrderEval(options.Get<bool>(kOutOfOrderEvalStr)),
@@ -156,8 +156,8 @@ void Search_revamp::StartThreads(size_t how_many) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
-//      worker.RunBlocking();
-      worker.RunBlocking2();
+     worker.RunBlocking();
+      // worker.RunBlocking2();
      }
     );
     if (i < (int)how_many - 1) {
@@ -264,7 +264,8 @@ void SearchWorker_revamp::RunBlocking() {
   int const MAXNEDGE = 100;
   float pval[MAXNEDGE];
   while (i < lim) {
-    computation_ = search_->network_->NewComputation();
+    
+    computation_ = std::make_unique<CachingComputation>(std::move(search_->network_->NewComputation()), search_->cache_);
 
     for (int j = 0; j < search_->kMiniBatchSize;) {
       //~ if (current_node_ == nullptr) {
@@ -404,7 +405,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       history_.Append((current_node->GetEdges())[idx].GetMove());
       newchild->ExtendNode(&history_);
       if (!newchild->IsTerminal()) {
-        AddNodeToComputation(newchild);
+        AddNodeToComputation2(newchild);
         minibatch_.push_back(newchild);
 
         if (DEBUG) std::cerr << "Adding child to batch\n";
@@ -468,13 +469,13 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
 }
 
 void SearchWorker_revamp::retrieveNNResult(Node_revamp* node, int batchidx) {
-  node->SetQ(-computation_->GetQVal(batchidx));  // should it be negated?
+  node->SetQ(-computation2_->GetQVal(batchidx));  // should it be negated?
 
   float total = 0.0;
   int nedge = node->GetNumEdges();
   pvals_.clear();
   for (int k = 0; k < nedge; k++) {
-    float p = computation_->GetPVal(batchidx, (node->GetEdges())[k].GetMove().as_nn_index());
+    float p = computation2_->GetPVal(batchidx, (node->GetEdges())[k].GetMove().as_nn_index());
     if (p < 0.0) {
       std::cerr << "p value < 0\n";
       p = 0.0;
@@ -506,10 +507,10 @@ void SearchWorker_revamp::RunBlocking2() {
     return;
   }
   minibatch_.clear();
-  computation_ = search_->network_->NewComputation();
-  AddNodeToComputation(worker_root_);
+  computation2_ = search_->network_->NewComputation();
+  AddNodeToComputation2(worker_root_);
   std::cerr << "Computing thread root ..";
-  computation_->ComputeBlocking();
+  computation2_->ComputeBlocking();
   std::cerr << " done\n";
   retrieveNNResult(worker_root_, 0);
 
@@ -519,7 +520,7 @@ void SearchWorker_revamp::RunBlocking2() {
 
   while (i < lim) {
     minibatch_.clear();
-    computation_ = search_->network_->NewComputation();
+    computation2_ = search_->network_->NewComputation();
 
     //~ std::cerr << "n: " << worker_root_->GetN() << "\n";
 
@@ -529,11 +530,11 @@ void SearchWorker_revamp::RunBlocking2() {
     
     std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
 
-    computation_->ComputeBlocking();
+    computation2_->ComputeBlocking();
     
     std::cerr << " done\n";
 
-    i += minibatch_.size();  // == computation_->GetBatchSize()
+    i += minibatch_.size();  // == computation2_->GetBatchSize()
     
     for (int j = 0; j < minibatch_.size(); j++) {
       retrieveNNResult(minibatch_[j], j);
@@ -566,15 +567,26 @@ void SearchWorker_revamp::RunBlocking2() {
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
-//  auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
-  auto planes = EncodePositionForNN(history_, 8);
-//  std::vector<uint16_t> moves;
-//  int nedge = node->GetNumEdges();
-//  for (int k = 0; k < nedge; k++) {
-//    moves.emplace_back(node->edges_[k].GetMove().as_nn_index());
-//  }
-//  computation_->AddInput(hash, std::move(planes), std::move(moves));
-  computation_->AddInput(std::move(planes));
+ auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
+ auto planes = EncodePositionForNN(history_, 8);
+ std::vector<uint16_t> moves;
+ int nedge = node->GetNumEdges();
+ for (int k = 0; k < nedge; k++) {
+   moves.emplace_back(node->GetEdges()[k].GetMove().as_nn_index());
+ }
+ computation_->AddInput(hash, std::move(planes), std::move(moves));
 }
 
+void SearchWorker_revamp::AddNodeToComputation2(Node_revamp* node) {
+ // auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
+  auto planes = EncodePositionForNN(history_, 8);
+ // std::vector<uint16_t> moves;
+ // int nedge = node->GetNumEdges();
+ // for (int k = 0; k < nedge; k++) {
+ //   moves.emplace_back(node->edges_[k].GetMove().as_nn_index());
+ // }
+  computation2_->AddInput(std::move(planes));
+}
+
+  
 }  // namespace lczero
