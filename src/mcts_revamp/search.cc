@@ -102,7 +102,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
                SyzygyTablebase* syzygy_tb)
     :
       root_node_(tree.GetCurrentHead()),
-      //~ cache_(cache),
+      cache_(cache),
       //~ syzygy_tb_(syzygy_tb),
       played_history_(tree.GetPositionHistory()),
       network_(network),
@@ -111,7 +111,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ initial_visits_(root_node_->GetN()),
       //~ best_move_callback_(best_move_callback),
       //~ info_callback_(info_callback),
-      kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr))
+      kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr)),
       //~ kMaxPrefetchBatch(options.Get<int>(kMaxPrefetchBatchStr)),
       //~ kCpuct(options.Get<float>(kCpuctStr)),
       //~ kTemperature(options.Get<float>(kTemperatureStr)),
@@ -121,7 +121,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       //~ kVerboseStats(options.Get<bool>(kVerboseStatsStr)),
       //~ kAggressiveTimePruning(options.Get<float>(kAggressiveTimePruningStr)),
       //~ kFpuReduction(options.Get<float>(kFpuReductionStr)),
-      //~ kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr))
+      kCacheHistoryLength(options.Get<int>(kCacheHistoryLengthStr))
       //~ kPolicySoftmaxTemp(options.Get<float>(kPolicySoftmaxTempStr)),
       //~ kAllowedNodeCollisions(options.Get<int>(kAllowedNodeCollisionsStr)),
       //~ kOutOfOrderEval(options.Get<bool>(kOutOfOrderEvalStr)),
@@ -262,8 +262,7 @@ void SearchWorker_revamp::RunBlocking() {
   int const MAXNEDGE = 100;
   float pval[MAXNEDGE];
   while (i < lim) {
-    computation_ = search_->network_->NewComputation();
-
+    computation_ = std::make_unique<CachingComputation>(std::move(search_->network_->NewComputation()), search_->cache_);
     for (int j = 0; j < search_->kMiniBatchSize;) {
       //~ if (current_node_ == nullptr) {
         //~ std::cerr << "current_node_ is null\n";
@@ -278,7 +277,7 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(73)); // optimised for 1060
+    std::this_thread::sleep_for(std::chrono::milliseconds(16)); // optimised for 1060
     LOGFILE << "RunNNComputation START ";
     start_comp_time_ = std::chrono::steady_clock::now();
 
@@ -323,15 +322,15 @@ void SearchWorker_revamp::RunBlocking() {
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
-//  auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
-  auto planes = EncodePositionForNN(history_, 8);
-//  std::vector<uint16_t> moves;
-//  int nedge = node->GetNumEdges();
-//  for (int k = 0; k < nedge; k++) {
-//    moves.emplace_back(node->edges_[k].GetMove().as_nn_index());
-//  }
-//  computation_->AddInput(hash, std::move(planes), std::move(moves));
-  computation_->AddInput(std::move(planes));
-}
+ auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
+ auto planes = EncodePositionForNN(history_, 8);
+ std::vector<uint16_t> moves;
+ int nedge = node->GetNumEdges();
+ for (int k = 0; k < nedge; k++) {
+   moves.emplace_back(node->edges_[k].GetMove().as_nn_index());
+ }
+ computation_->AddInput(hash, std::move(planes), std::move(moves));
+//   computation_->AddInput(std::move(planes));
+  }
 
 }  // namespace lczero
