@@ -156,8 +156,8 @@ void Search_revamp::StartThreads(size_t how_many) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
-     worker.RunBlocking();
-      // worker.RunBlocking2();
+     // worker.RunBlocking();
+      worker.RunBlocking2();
      }
     );
     if (i < (int)how_many - 1) {
@@ -325,6 +325,25 @@ void SearchWorker_revamp::RunBlocking() {
   delete [] minibatch;
 }
 
+  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int d) {
+    float max_q = *max_element(std::begin(Q), std::end(Q));
+    std::vector<float> a;
+    std::vector<float> b;
+    float c = 0;
+    std::vector<float> q_prob;
+    for(int i = 0; i < Q.size(); i++){
+      a[i] = (float)d/max_q  * Q[i];
+      b[i] = exp(a[i]);
+    }
+    std::for_each(b.begin(), b.end(), [&] (float f) {
+    c += f;
+});
+    for(int i = 0; i < Q.size(); i++){
+      q_prob[i] = b[i]/c;
+    }
+    return(q_prob);
+  }
+  
 // computes weights for the children based on average Qs (and possibly Ps) and, if there are unexpanded edges, a weight for the first unexpanded edge (the unexpanded with highest P)
 // weights are >= 0, sum of weights is 1
 // stored in weights_, idx corresponding to index in EdgeList

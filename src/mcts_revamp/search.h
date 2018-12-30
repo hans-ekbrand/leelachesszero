@@ -150,6 +150,7 @@ class SearchWorker_revamp {
   void computeWeights(Node_revamp* node);
   int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
   void retrieveNNResult(Node_revamp* node, int batchidx);
+  std::vector<float> q_to_prob(std::vector<float> Q, int d);
 
   Search_revamp* const search_;
   std::vector<Node_revamp *> minibatch_;
