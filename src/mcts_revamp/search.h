@@ -115,13 +115,14 @@ private:
   std::vector<std::thread> threads_ GUARDED_BY(threads_mutex_);
 
   Node_revamp* root_node_;
+
+  NNCache* cache_;
+
   // Fixed positions which happened before the search.
   /*const*/ PositionHistory/*&*/ played_history_;  // not const ref so that startthreads can create top of tree so that there is a leaf for each thread
 
   Network* const network_;
   const SearchLimits_revamp limits_;
-
-  NNCache* cache_;
 
   // External parameters
   const int kMiniBatchSize;
@@ -146,7 +147,7 @@ class SearchWorker_revamp {
 
  private:
   void AddNodeToComputation(Node_revamp* node);
-  void AddNodeToComputation2(Node_revamp* node);
+  void AddNodeToComputation2();
   void computeWeights(Node_revamp* node);
   int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
   void retrieveNNResult(Node_revamp* node, int batchidx);

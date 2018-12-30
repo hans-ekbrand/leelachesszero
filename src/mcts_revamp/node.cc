@@ -342,6 +342,14 @@ void Node_revamp::ExtendNode(PositionHistory* history) {
   //~ std::cerr << "Extended node with " << nedge << " edges\n";
 }
 
+int Node_revamp::ComputeHeight() {
+  int maxh = 0;
+  for (int i = 0; i < GetNumChildren(); i++) {
+    int h = GetEdges()[i].GetChild()->ComputeHeight();
+    if (h > maxh) maxh = h;
+  }
+  return maxh + 1;
+}
 
 /////////////////////////////////////////////////////////////////////////
 // NodeTree_revamp

@@ -30,6 +30,7 @@
 #include <iostream>
 #include <fstream>
 #include <math.h>
+#include <iomanip>
 
 #include "neural/encoder.h"
 
@@ -131,10 +132,11 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
 
 
 void Search_revamp::StartThreads(size_t how_many) {
-  if (root_node_->GetNumEdges() > 0) {
-    std::cerr << "Tree not empty, doing nothing\n";
-    return;
-  }
+  // RunBlocking2 does handle non empty tree
+  //~ if (root_node_->GetNumEdges() > 0 || root_node_->IsTerminal()) {
+    //~ std::cerr << "Tree not empty, doing nothing\n";
+    //~ return;
+  //~ }
 
   std::cerr << "Letting " << how_many << " threads create " << limits_.visits << " nodes each\n";
 
@@ -381,7 +383,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   if (DEBUG) {
     std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
-    for (int i = widx; i < weights_.size(); i++) {
+    for (int i = widx; i < (int)weights_.size(); i++) {
       std::cerr << " " << weights_[i];
     }
     std::cerr << "\n";
@@ -406,7 +408,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       history_.Append((current_node->GetEdges())[idx].GetMove());
       newchild->ExtendNode(&history_);
       if (!newchild->IsTerminal()) {
-        AddNodeToComputation2(newchild);
+        AddNodeToComputation2();
         minibatch_.push_back(newchild);
 
         if (DEBUG) std::cerr << "Adding child to batch\n";
@@ -420,7 +422,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
   
-  for (int i = 0; i < weights_.size() - widx; i++) {
+  for (int i = 0; i < (int)weights_.size() - widx; i++) {
     double w = (double)weights_[widx + i];
     if (w > 0.0) {
       int n = (current_node->GetEdges())[i].GetChild()->GetN();
@@ -433,6 +435,8 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       //~ }
 
       if (ai >= 1) {
+        if (ai > noof_nodes) ai = noof_nodes;
+
         history_.Append((current_node->GetEdges())[i].GetMove());
 
         if (DEBUG) std::cerr << "rec call\n";
@@ -456,7 +460,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
     weights_.pop_back();
   }
 
-  if (weights_.size() != widx) {
+  if ((int)weights_.size() != widx) {
     std::cerr << "weights_.size() != widx\n";
   }
 
@@ -502,31 +506,33 @@ void SearchWorker_revamp::recalcPropagatedQ(Node_revamp* node) {
   double q = 0.0;
   for (int i = 0; i < node->GetNumChildren(); i++) {
     Node_revamp* child = (node->GetEdges())[i].GetChild();
-    q += child->GetPQ() * (double)child->GetN();
+    q += child->GetQ() * (double)child->GetN();
   }
-  node->SetPQ(- q / (double)(node->GetN() - 1));
+  node->SetQ(- q / (double)(node->GetN() - 1));
 }
 
 void SearchWorker_revamp::RunBlocking2() {
   std::cerr << "Running thread for node " << worker_root_ << "\n";
   const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
 
-  worker_root_->ExtendNode(&history_);
-  if (worker_root_->IsTerminal()) {
-    std::cerr << "Root " << worker_root_ << " is terminal, nothing to do\n";
-    return;
-  }
-  minibatch_.clear();
-  computation2_ = search_->network_->NewComputation();
-  AddNodeToComputation2(worker_root_);
-  std::cerr << "Computing thread root ..";
-  computation2_->ComputeBlocking();
-  std::cerr << " done\n";
-  retrieveNNResult(worker_root_, 0);
-
   int lim = search_->limits_.visits;
+  int i = 0;
 
-  int i = 1;
+  if (worker_root_->GetNumEdges() == 0 && !worker_root_->IsTerminal()) {  // root node not extended
+    worker_root_->ExtendNode(&history_);
+    if (worker_root_->IsTerminal()) {
+      std::cerr << "Root " << worker_root_ << " is terminal, nothing to do\n";
+      return;
+    }
+    minibatch_.clear();
+    computation2_ = search_->network_->NewComputation();
+    AddNodeToComputation2();
+    std::cerr << "Computing thread root ..";
+    computation2_->ComputeBlocking();
+    std::cerr << " done\n";
+    retrieveNNResult(worker_root_, 0);
+    i++;
+  }
 
   while (i < lim) {
     minibatch_.clear();
@@ -546,7 +552,7 @@ void SearchWorker_revamp::RunBlocking2() {
 
     i += minibatch_.size();  // == computation2_->GetBatchSize()
     
-    for (int j = 0; j < minibatch_.size(); j++) {
+    for (int j = 0; j < (int)minibatch_.size(); j++) {
       retrieveNNResult(minibatch_[j], j);
     }
 
@@ -562,32 +568,22 @@ void SearchWorker_revamp::RunBlocking2() {
 
   std::cerr << "n: " << worker_root_->GetN() << "\n";
 
-  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (worker_root_->GetEdges())[i].GetMove().as_string();
-  }
-  std::cerr << "\n";
   float totp = 0.0;
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (worker_root_->GetEdges())[i].GetP();
     totp += (worker_root_->GetEdges())[i].GetP();
   }
-  std::cerr << "\n";
+  std::cerr << "move   P          norm P     n          norm n     h    Q\n";
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (worker_root_->GetEdges())[i].GetP() / totp;
+    std::cerr << std::fixed
+              << (worker_root_->GetEdges())[i].GetMove().as_string() << " "
+              << std::setw(10) << (worker_root_->GetEdges())[i].GetP() << " "
+              << std::setw(10) << (worker_root_->GetEdges())[i].GetP() / totp << " "
+              << std::setw(10) << (worker_root_->GetEdges())[i].GetChild()->GetN() << " "
+              << std::setw(10) << (float)(worker_root_->GetEdges())[i].GetChild()->GetN() / (float)(worker_root_->GetN() - 1) << " "
+              << std::setw(4) << (worker_root_->GetEdges())[i].GetChild()->ComputeHeight() << " "
+              << std::setw(10) << (float)(worker_root_->GetEdges())[i].GetChild()->GetQ()
+              << "\n";
   }
-  std::cerr << "\n";
-  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (worker_root_->GetEdges())[i].GetChild()->GetN();
-  }
-  std::cerr << "\n";
-  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (float)(worker_root_->GetEdges())[i].GetChild()->GetN() / (float)(worker_root_->GetN() - 1);
-  }
-  std::cerr << "\n";
-  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
-    std::cerr << " " << (float)(worker_root_->GetEdges())[i].GetChild()->GetPQ();
-  }
-  std::cerr << "\n";
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
@@ -601,7 +597,7 @@ void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
  computation_->AddInput(hash, std::move(planes), std::move(moves));
 }
 
-void SearchWorker_revamp::AddNodeToComputation2(Node_revamp* node) {
+void SearchWorker_revamp::AddNodeToComputation2() {
  // auto hash = history_.HashLast(search_->kCacheHistoryLength + 1);
   auto planes = EncodePositionForNN(history_, 8);
  // std::vector<uint16_t> moves;
@@ -611,6 +607,5 @@ void SearchWorker_revamp::AddNodeToComputation2(Node_revamp* node) {
  // }
   computation2_->AddInput(std::move(planes));
 }
-
 
 }  // namespace lczero
