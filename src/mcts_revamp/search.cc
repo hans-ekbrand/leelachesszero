@@ -156,8 +156,8 @@ void Search_revamp::StartThreads(size_t how_many) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
-     worker.RunBlocking();
-      // worker.RunBlocking2();
+//      worker.RunBlocking();
+      worker.RunBlocking2();
      }
     );
     if (i < (int)how_many - 1) {
@@ -264,7 +264,6 @@ void SearchWorker_revamp::RunBlocking() {
   int const MAXNEDGE = 100;
   float pval[MAXNEDGE];
   while (i < lim) {
-    
     computation_ = std::make_unique<CachingComputation>(std::move(search_->network_->NewComputation()), search_->cache_);
 
     for (int j = 0; j < search_->kMiniBatchSize;) {
@@ -360,6 +359,8 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   bool const DEBUG = false;
   
   int orig_noof_nodes = noof_nodes;
+
+  nodestack_.push_back(current_node);
   
   int widx = weights_.size();
   computeWeights(current_node);
@@ -497,6 +498,15 @@ void SearchWorker_revamp::retrieveNNResult(Node_revamp* node, int batchidx) {
   }
 }
 
+void SearchWorker_revamp::recalcPropagatedQ(Node_revamp* node) {
+  double q = 0.0;
+  for (int i = 0; i < node->GetNumChildren(); i++) {
+    Node_revamp* child = (node->GetEdges())[i].GetChild();
+    q += child->GetPQ() * (double)child->GetN();
+  }
+  node->SetPQ(- q / (double)(node->GetN() - 1));
+}
+
 void SearchWorker_revamp::RunBlocking2() {
   std::cerr << "Running thread for node " << worker_root_ << "\n";
   const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
@@ -539,6 +549,12 @@ void SearchWorker_revamp::RunBlocking2() {
     for (int j = 0; j < minibatch_.size(); j++) {
       retrieveNNResult(minibatch_[j], j);
     }
+
+    for (int n = nodestack_.size(); n > 0; n--) {
+      Node_revamp* node = nodestack_.back();
+      nodestack_.pop_back();
+      recalcPropagatedQ(node);
+    }
   }
 
   int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
@@ -546,6 +562,10 @@ void SearchWorker_revamp::RunBlocking2() {
 
   std::cerr << "n: " << worker_root_->GetN() << "\n";
 
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (worker_root_->GetEdges())[i].GetMove().as_string();
+  }
+  std::cerr << "\n";
   float totp = 0.0;
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
     std::cerr << " " << (worker_root_->GetEdges())[i].GetP();
@@ -562,6 +582,10 @@ void SearchWorker_revamp::RunBlocking2() {
   std::cerr << "\n";
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
     std::cerr << " " << (float)(worker_root_->GetEdges())[i].GetChild()->GetN() / (float)(worker_root_->GetN() - 1);
+  }
+  std::cerr << "\n";
+  for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
+    std::cerr << " " << (float)(worker_root_->GetEdges())[i].GetChild()->GetPQ();
   }
   std::cerr << "\n";
 }
@@ -588,5 +612,5 @@ void SearchWorker_revamp::AddNodeToComputation2(Node_revamp* node) {
   computation2_->AddInput(std::move(planes));
 }
 
-  
+
 }  // namespace lczero

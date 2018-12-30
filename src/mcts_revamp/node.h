@@ -118,8 +118,10 @@ class Node_revamp {
   // Returns node eval, i.e. average subtree V for non-terminal node and -1/0/1
   // for terminal nodes.
   float GetQ() const { return q_; }
+  void SetQ(float q) { q_ = q; pq_ = q; }
 
-  void SetQ(float q) { q_ = q; }
+  double GetPQ() const { return pq_; }
+  void SetPQ(double q) { pq_ = q; }
 
   // Returns whether the node is known to be draw/lose/win.
   bool IsTerminal() const { return is_terminal_; }
@@ -167,6 +169,7 @@ class Node_revamp {
   // 8 byte fields.
   // Pointer to a parent node. nullptr for the root.
   Node_revamp* parent_ = nullptr;
+  double pq_ = 0.0;
 
   // 4 byte fields.
   // Average value (from value head of neural network) of all visited nodes in

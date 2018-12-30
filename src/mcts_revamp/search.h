@@ -150,11 +150,15 @@ class SearchWorker_revamp {
   void computeWeights(Node_revamp* node);
   int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
   void retrieveNNResult(Node_revamp* node, int batchidx);
+  void recalcPropagatedQ(Node_revamp* node);
 
   Search_revamp* const search_;
   std::vector<Node_revamp *> minibatch_;
+
   std::vector<float> weights_;
   std::vector<float> pvals_;
+  std::vector<Node_revamp *> nodestack_;
+
   std::unique_ptr<CachingComputation> computation_;
   std::unique_ptr<NetworkComputation> computation2_;
   // History is reset and extended by PickNodeToExtend().
