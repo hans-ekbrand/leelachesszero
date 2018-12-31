@@ -325,7 +325,7 @@ void SearchWorker_revamp::RunBlocking() {
   delete [] minibatch;
 }
 
-  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int depth) {
+  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int depth, float multiplier) {
     // rebase depth from 0 to 1
     depth++;
     auto min_max = std::minmax_element(std::begin(Q), std::end(Q));
@@ -341,7 +341,7 @@ void SearchWorker_revamp::RunBlocking() {
       } else {
 	a[i] = Q[i] * (float)depth/max_q;
       }
-      b[i] = exp(a[i]);
+      b[i] = exp(multiplier * a[i]);
     }
     std::for_each(b.begin(), b.end(), [&] (float f) {
     c += f;
@@ -402,7 +402,8 @@ void SearchWorker_revamp::RunBlocking() {
       Q[i] = q;
     }
     std::vector<float> Q_prob (n);
-    Q_prob = q_to_prob(Q, depth);
+    float multiplier = 1.0f;
+    Q_prob = q_to_prob(Q, depth, multiplier);
     for(int i = 0; i < n; i++){
       weights_.push_back(Q_prob[i]);
       sum += weights_[widx + 1];
