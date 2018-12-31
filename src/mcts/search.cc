@@ -694,7 +694,6 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
   // incremented for each node in the playout (via TryStartScoreUpdate()).
 
   Node* node = search_->root_node_;
-  LOGFILE << node->DebugString();
   Node::Iterator best_edge;
   Node::Iterator second_best_edge;
   // Initialize position sequence with pre-move position.
@@ -749,7 +748,6 @@ SearchWorker::NodeToProcess SearchWorker::PickNodeToExtend(
             : -node->GetQ() - params_.GetFpuReduction() *
                                   std::sqrt(node->GetVisitedPolicy());
     for (auto child : node->Edges()) {
-      LOGFILE << "child.move = " << child.GetMove();
       if (is_root_node) {
         // If there's no chance to catch up to the current best node with
         // remaining playouts, don't consider it.
