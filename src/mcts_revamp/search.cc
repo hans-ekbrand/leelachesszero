@@ -355,7 +355,6 @@ void SearchWorker_revamp::RunBlocking() {
 // computes weights for the children based on average Qs (and possibly Ps) and, if there are unexpanded edges, a weight for the first unexpanded edge (the unexpanded with highest P)
 // weights are >= 0, sum of weights is 1
 // stored in weights_, idx corresponding to index in EdgeList
-// for now, weights are simply normalized Ps
   void SearchWorker_revamp::computeWeights(Node_revamp* node, int depth) {
   double sum = 0.0;
   int n = node->GetNumChildren() + 1;
@@ -373,7 +372,9 @@ void SearchWorker_revamp::RunBlocking() {
 
   // If no child is extended, then just use P. 
   if(n == 1 && (node->GetEdges())[0].GetChild() == nullptr){
-    weights_.push_back((node->GetEdges())[0].GetP());
+    // Shouldn't we just push 1 here, we _know_ that we want the child with the highest P.
+    // weights_.push_back((node->GetEdges())[0].GetP());
+    weights_.push_back(1);
     sum += weights_[widx + 1];
     if(DEBUG) {
       std::cerr << "No child extended yet, use P \n";
@@ -430,17 +431,18 @@ void SearchWorker_revamp::RunBlocking() {
     }
   }
 
-  if (sum > 0.0) {
-    float scale = (float)(1.0 / sum);
-    for (int i = 0; i < n; i++) {
-      weights_[widx + i] *= scale;
-    }
-  } else {
-    float x = 1.0f / (float)n;
-    for (int i = 0; i < n; i++) {
-      weights_[widx + i] = x;
-    }
-  }
+  // // Probably not needed anymore, since q_to_prob returns a vector with sum=1 and else there is only one alternative: highest P.
+  // if (sum > 0.0) {
+  //   float scale = (float)(1.0 / sum);
+  //   for (int i = 0; i < n; i++) {
+  //     weights_[widx + i] *= scale;
+  //   }
+  // } else {
+  //   float x = 1.0f / (float)n;
+  //   for (int i = 0; i < n; i++) {
+  //     weights_[widx + i] = x;
+  //   }
+  // }
 }
 
 // returns number of nodes added in sub tree root at current_node
