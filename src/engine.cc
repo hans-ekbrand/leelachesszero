@@ -123,6 +123,7 @@ void EngineController::PopulateOptions(OptionsParser* options) {
   options->Add<BoolOption>(kPonderId) = true;
   options->Add<FloatOption>(kSpendSavedTimeId, 0.0f, 1.0f) = 0.6f;
 
+  // Old version SearchParams::Populate(options);
   Search_revamp::PopulateUciParams(options);
   ConfigFile::PopulateOptions(options);
 
