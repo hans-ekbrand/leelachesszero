@@ -30,7 +30,7 @@
 #include <functional>
 
 #include "engine.h"
-#include "mcts/search.h"
+#include "mcts_revamp/search.h"
 #include "neural/factory.h"
 #include "neural/loader.h"
 #include "utils/configfile.h"
@@ -123,24 +123,24 @@ void EngineController::PopulateOptions(OptionsParser* options) {
   options->Add<BoolOption>(kPonderId) = true;
   options->Add<FloatOption>(kSpendSavedTimeId, 0.0f, 1.0f) = 0.6f;
 
-  SearchParams::Populate(options);
+  Search_revamp::PopulateUciParams(options);
   ConfigFile::PopulateOptions(options);
 
   auto defaults = options->GetMutableDefaultsOptions();
 
-  defaults->Set<int>(SearchParams::kMiniBatchSizeId.GetId(), 256);
-  defaults->Set<float>(SearchParams::kFpuReductionId.GetId(), 1.2f);
-  defaults->Set<float>(SearchParams::kCpuctId.GetId(), 3.4f);
-  defaults->Set<float>(SearchParams::kPolicySoftmaxTempId.GetId(), 2.2f);
-  defaults->Set<int>(SearchParams::kAllowedTotalNodeCollisionsId.GetId(), 9999);
-  defaults->Set<int>(SearchParams::kAllowedNodeCollisionEventsId.GetId(), 32);
-  defaults->Set<int>(SearchParams::kCacheHistoryLengthId.GetId(), 0);
-  defaults->Set<bool>(SearchParams::kOutOfOrderEvalId.GetId(), true);
+  defaults->Set<int>(Search_revamp::kMiniBatchSizeStr, 256);    // Minibatch = 256
+  defaults->Set<float>(Search_revamp::kFpuReductionStr, 1.2f);  // FPU reduction = 1.2
+  defaults->Set<float>(Search_revamp::kCpuctStr, 3.4f);         // CPUCT = 3.4
+  defaults->Set<float>(Search_revamp::kPolicySoftmaxTempStr, 2.2f);  // Psoftmax = 2.2
+  defaults->Set<int>(Search_revamp::kAllowedNodeCollisionsStr, 32);  // Node collisions
+  defaults->Set<int>(Search_revamp::kCacheHistoryLengthStr, 0);
+  defaults->Set<bool>(Search_revamp::kOutOfOrderEvalStr, true);
+
 }
 
-SearchLimits EngineController::PopulateSearchLimits(int ply, bool is_black,
+SearchLimits_revamp EngineController::PopulateSearchLimits(int ply, bool is_black,
                                                     const GoParams& params) {
-  SearchLimits limits;
+  SearchLimits_revamp limits;
   limits.time_ms = params.movetime;
   int64_t time = (is_black ? params.btime : params.wtime);
   if (!params.searchmoves.empty()) {
@@ -298,7 +298,7 @@ void EngineController::SetupPosition(
   SharedLock lock(busy_mutex_);
   search_.reset();
 
-  if (!tree_) tree_ = std::make_unique<NodeTree>();
+  if (!tree_) tree_ = std::make_unique<NodeTree_revamp>();
 
   std::vector<Move> moves;
   for (const auto& move : moves_str) moves.emplace_back(move);
@@ -367,7 +367,7 @@ void EngineController::Go(const GoParams& params) {
     };
   }
 
-  search_ = std::make_unique<Search>(*tree_, network_.get(), best_move_callback,
+  search_ = std::make_unique<Search_revamp>(*tree_, network_.get(), best_move_callback,
                                      info_callback, limits, options_, &cache_,
                                      syzygy_tb_.get());
 
