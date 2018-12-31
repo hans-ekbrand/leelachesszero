@@ -281,7 +281,7 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(73)); // optimised for 1060
+    std::this_thread::sleep_for(std::chrono::milliseconds(0)); // optimised for 1060
     LOGFILE << "RunNNComputation START ";
     start_comp_time_ = std::chrono::steady_clock::now();
 
@@ -325,20 +325,28 @@ void SearchWorker_revamp::RunBlocking() {
   delete [] minibatch;
 }
 
-  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int d) {
-    float max_q = *max_element(std::begin(Q), std::end(Q));
-    std::vector<float> a;
-    std::vector<float> b;
+  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int depth) {
+    // rebase depth from 0 to 1
+    depth++;
+    auto min_max = std::minmax_element(std::begin(Q), std::end(Q));
+    float min_q = Q[min_max.first-std::begin(Q)];
+    float max_q = Q[min_max.second-std::begin(Q)];
+    std::vector<float> a (Q.size());
+    std::vector<float> b (Q.size());
     float c = 0;
-    std::vector<float> q_prob;
-    for(int i = 0; i < Q.size(); i++){
-      a[i] = (float)d/max_q  * Q[i];
+    std::vector<float> q_prob (Q.size());
+    for(long unsigned int i = 0; i < Q.size(); i++){
+      if(min_q < 0){
+	a[i] = (Q[i] - min_q) * (float)depth/(max_q - min_q);
+      } else {
+	a[i] = Q[i] * (float)depth/max_q;
+      }
       b[i] = exp(a[i]);
     }
     std::for_each(b.begin(), b.end(), [&] (float f) {
     c += f;
 });
-    for(int i = 0; i < Q.size(); i++){
+    for(long unsigned int i = 0; i < Q.size(); i++){
       q_prob[i] = b[i]/c;
     }
     return(q_prob);
@@ -348,18 +356,60 @@ void SearchWorker_revamp::RunBlocking() {
 // weights are >= 0, sum of weights is 1
 // stored in weights_, idx corresponding to index in EdgeList
 // for now, weights are simply normalized Ps
-void SearchWorker_revamp::computeWeights(Node_revamp* node) {
+  void SearchWorker_revamp::computeWeights(Node_revamp* node, int depth) {
   double sum = 0.0;
   int n = node->GetNumChildren() + 1;
   if (n > node->GetNumEdges()) n = node->GetNumEdges();
 
   int widx = weights_.size();
 
-  for (int i = 0; i < n; i++) {
-//    weights_.push_back(1.0);
-    weights_.push_back((node->GetEdges())[i].GetP());
-    sum += weights_[widx + i];
+  // For debugging
+  bool beta_to_move = (depth % 2 != 0);
+  std::cerr << "Depth: " << depth << "\n";
+
+  // If no child is extended, then just use P. 
+  if(n == 1 && (node->GetEdges())[0].GetChild() == nullptr){
+    std::cerr << "No child extended yet, use P \n";
+    weights_.push_back((node->GetEdges())[0].GetP());
+    sum += weights_[widx + 1];
+    // For debugging 
+    float p = (node->GetEdges())[0].GetP();
+    std::cerr << "move: " << (node->GetEdges())[0].GetMove(beta_to_move).as_string() << " P: " << p << " \n";    
+  } else {
+    // At least one child is extended, weight by Q.
+    // All but the last child has Q, so start by estimating the Q of the last child using the Q of the
+    // second last child and the P of the this child and the last child.
+    std::vector<float> Q (n);
+    float q;
+    for (int i = 0; i < n; i++) {
+      float p = (node->GetEdges())[i].GetP();
+      if((node->GetEdges())[i].GetChild() != nullptr) {
+	q = (node->GetEdges())[i].GetChild()->GetQ();
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << q << " \n";
+      } else {
+	// Simplistic estimate: let the ratio between the P values be the ratio of the q values too.
+	// If Q is below 1, then reverse the nominator and the denominator
+	q = -0.05; // used in the rare case that q of better sibbling happens to be exactly 0.
+	if((node->GetEdges())[i-1].GetChild()->GetQ() > 0) {
+	  q = (node->GetEdges())[i-1].GetChild()->GetQ() * (node->GetEdges())[i].GetP() / (node->GetEdges())[i-1].GetP();	  
+	} 
+	if((node->GetEdges())[i-1].GetChild()->GetQ() < 0) {
+	  q = (node->GetEdges())[i-1].GetChild()->GetQ() * (node->GetEdges())[i-1].GetP() / (node->GetEdges())[i].GetP();	  
+	}
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Estimated Q: " << q << " \n";
+      }
+
+      Q[i] = q;
+    }
+    std::vector<float> Q_prob (n);
+    Q_prob = q_to_prob(Q, depth);
+    for(int i = 0; i < n; i++){
+      weights_.push_back(Q_prob[i]);
+      sum += weights_[widx + 1];
+      std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
+    }
   }
+
   if (sum > 0.0) {
     float scale = (float)(1.0 / sum);
     for (int i = 0; i < n; i++) {
@@ -374,14 +424,14 @@ void SearchWorker_revamp::computeWeights(Node_revamp* node) {
 }
 
 // returns number of nodes added in sub tree root at current_node
-int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes) {
+int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth) {
   
   bool const DEBUG = false;
   
   int orig_noof_nodes = noof_nodes;
   
-  int widx = weights_.size();
-  computeWeights(current_node);
+  long unsigned int widx = weights_.size();
+  computeWeights(current_node, depth);
   int ntot = current_node->GetN() - 1;
   int ntotafter = ntot + noof_nodes;
   int npos = 0;
@@ -399,7 +449,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   if (DEBUG) {
     std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
-    for (int i = widx; i < weights_.size(); i++) {
+    for (long unsigned int i = widx; i < weights_.size(); i++) {
       std::cerr << " " << weights_[i];
     }
     std::cerr << "\n";
@@ -438,7 +488,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
   
-  for (int i = 0; i < weights_.size() - widx; i++) {
+  for (long unsigned int i = 0; i < weights_.size() - widx; i++) {
     double w = (double)weights_[widx + i];
     if (w > 0.0) {
       int n = (current_node->GetEdges())[i].GetChild()->GetN();
@@ -455,7 +505,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
 
         if (DEBUG) std::cerr << "rec call\n";
 
-        nnewnodes += pickNodesToExtend((current_node->GetEdges())[i].GetChild(), ai);
+        nnewnodes += pickNodesToExtend((current_node->GetEdges())[i].GetChild(), ai, depth+1);
         history_.Pop();
 
         if (DEBUG) std::cerr << "return rec call\n";
@@ -543,7 +593,7 @@ void SearchWorker_revamp::RunBlocking2() {
 
     //~ std::cerr << "n: " << worker_root_->GetN() << "\n";
 
-    pickNodesToExtend(worker_root_, search_->kMiniBatchSize);
+    pickNodesToExtend(worker_root_, search_->kMiniBatchSize, 0);
 
     //~ std::cerr << "weights_.size(): " << weights_.size() << "\n";
     
@@ -555,7 +605,7 @@ void SearchWorker_revamp::RunBlocking2() {
 
     i += minibatch_.size();  // == computation2_->GetBatchSize()
     
-    for (int j = 0; j < minibatch_.size(); j++) {
+    for (long unsigned int j = 0; j < minibatch_.size(); j++) {
       retrieveNNResult(minibatch_[j], j);
     }
   }

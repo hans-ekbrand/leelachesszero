@@ -147,8 +147,8 @@ class SearchWorker_revamp {
  private:
   void AddNodeToComputation(Node_revamp* node);
   void AddNodeToComputation2(Node_revamp* node);
-  void computeWeights(Node_revamp* node);
-  int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
+  void computeWeights(Node_revamp* node, int depth);
+  int pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth);
   void retrieveNNResult(Node_revamp* node, int batchidx);
   std::vector<float> q_to_prob(std::vector<float> Q, int d);
 
