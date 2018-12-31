@@ -363,51 +363,70 @@ void SearchWorker_revamp::RunBlocking() {
 
   int widx = weights_.size();
 
+  bool DEBUG = false;
+
   // For debugging
   bool beta_to_move = (depth % 2 != 0);
-  std::cerr << "Depth: " << depth << "\n";
+  if(DEBUG) {
+    std::cerr << "Depth: " << depth << "\n";
+  }
 
   // If no child is extended, then just use P. 
   if(n == 1 && (node->GetEdges())[0].GetChild() == nullptr){
-    std::cerr << "No child extended yet, use P \n";
     weights_.push_back((node->GetEdges())[0].GetP());
     sum += weights_[widx + 1];
-    // For debugging 
-    float p = (node->GetEdges())[0].GetP();
-    std::cerr << "move: " << (node->GetEdges())[0].GetMove(beta_to_move).as_string() << " P: " << p << " \n";    
+    if(DEBUG) {
+      std::cerr << "No child extended yet, use P \n";
+      float p = (node->GetEdges())[0].GetP();
+      std::cerr << "move: " << (node->GetEdges())[0].GetMove(beta_to_move).as_string() << " P: " << p << " \n";
+    }
   } else {
     // At least one child is extended, weight by Q.
-    // All but the last child has Q, so start by estimating the Q of the last child using the Q of the
-    // second last child and the P of the this child and the last child.
-    std::vector<float> Q (n);
-    float q;
-    for (int i = 0; i < n; i++) {
-      float p = (node->GetEdges())[i].GetP();
-      if((node->GetEdges())[i].GetChild() != nullptr) {
-	q = (node->GetEdges())[i].GetChild()->GetQ();
-	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << q << " \n";
-      } else {
-	// Simplistic estimate: let the ratio between the P values be the ratio of the q values too.
-	// If Q is below 1, then reverse the nominator and the denominator
-	q = -0.05; // used in the rare case that q of better sibbling happens to be exactly 0.
-	if((node->GetEdges())[i-1].GetChild()->GetQ() > 0) {
-	  q = (node->GetEdges())[i-1].GetChild()->GetQ() * (node->GetEdges())[i].GetP() / (node->GetEdges())[i-1].GetP();	  
-	} 
-	if((node->GetEdges())[i-1].GetChild()->GetQ() < 0) {
-	  q = (node->GetEdges())[i-1].GetChild()->GetQ() * (node->GetEdges())[i-1].GetP() / (node->GetEdges())[i].GetP();	  
-	}
-	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Estimated Q: " << q << " \n";
-      }
 
-      Q[i] = q;
-    }
     std::vector<float> Q_prob (n);
     float multiplier = 1.0f;
+    std::vector<float> Q (n);
+
+    // Populate the vector Q, all but the last child already has it
+    for (int i = 0; i < n-1; i++) {
+      Q[i] = (node->GetEdges())[i].GetChild()->GetQ();
+      if(DEBUG){
+	float p = (node->GetEdges())[i].GetP();
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << Q[i] << " \n";
+      }
+    }
+    
+    if((node->GetEdges())[n-1].GetChild() != nullptr){
+      // All children have a Q value
+      Q[n-1] = (node->GetEdges())[n-1].GetChild()->GetQ();
+    } else {
+      Q[n-1] = -0.05; // used in the rare case that q of better sibbling happens to be exactly 0.
+      // Simplistic estimate: let the ratio between the P values be the ratio of the q values too.
+      // If Q is below 1, then reverse the nominator and the denominator
+      if((node->GetEdges())[n-2].GetChild()->GetQ() > 0) {
+	Q[n-1] = (node->GetEdges())[n-2].GetChild()->GetQ() * (node->GetEdges())[n-1].GetP() / (node->GetEdges())[n-2].GetP();
+      } 
+      if((node->GetEdges())[n-2].GetChild()->GetQ() < 0) {
+	Q[n-1] = (node->GetEdges())[n-2].GetChild()->GetQ() * (node->GetEdges())[n-2].GetP() / (node->GetEdges())[n-1].GetP();	  
+      }
+    }
+    if(DEBUG){
+      float p = (node->GetEdges())[n-1].GetP();
+      std::cerr << "move: " << (node->GetEdges())[n-1].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << Q[n-1];
+      if((node->GetEdges())[n-1].GetChild() == nullptr){
+	std::cerr << " (estimated value) \n";
+      } else {
+	std::cerr << " \n";
+      }
+    }
+
     Q_prob = q_to_prob(Q, depth, multiplier);
     for(int i = 0; i < n; i++){
       weights_.push_back(Q_prob[i]);
       sum += weights_[widx + 1];
-      std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
+      if(DEBUG){
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
+      }
     }
   }
 
