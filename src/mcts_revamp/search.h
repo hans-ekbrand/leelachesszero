@@ -43,6 +43,8 @@
 
 namespace lczero {
 
+extern std::atomic<int> full_tree_depth;
+
 struct SearchLimits_revamp {
   std::int64_t visits = -1;
   std::int64_t playouts = -1;
@@ -148,10 +150,11 @@ class SearchWorker_revamp {
  private:
   void AddNodeToComputation(Node_revamp* node);
   void AddNodeToComputation2();
-  void computeWeights(Node_revamp* node);
-  int pickNodesToExtend(Node_revamp* current_node, int noof_nodes);
   void retrieveNNResult(Node_revamp* node, int batchidx);
   void recalcPropagatedQ(Node_revamp* node);
+  void computeWeights(Node_revamp* node, int depth);
+  int pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth);
+  std::vector<float> q_to_prob(std::vector<float> Q, int d, float multiplier, float max_focus);
 
   Search_revamp* const search_;
   std::vector<Node_revamp *> minibatch_;
