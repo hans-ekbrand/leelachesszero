@@ -76,12 +76,13 @@ class EngineController {
   void PonderHit();
   // Must not block.
   void Stop();
+  void SetCacheSize(int size);
 
   SearchLimits_revamp PopulateSearchLimits(int ply, bool is_black,
                                     const GoParams& params);
 
  private:
-  void UpdateFromUciOptions();
+  void UpdateTBAndNetwork();
 
   void SetupPosition(const std::string& fen,
                      const std::vector<std::string>& moves);
@@ -116,7 +117,6 @@ class EngineController {
 
   // How much less time was used by search than what was allocated.
   int64_t time_spared_ms_ = 0;
-  std::chrono::steady_clock::time_point move_start_time_;
 };
 
 class EngineLoop : public UciLoop {
@@ -136,7 +136,10 @@ class EngineLoop : public UciLoop {
   void CmdStop() override;
 
  private:
+  void EnsureOptionsSent();
+
   OptionsParser options_;
+  bool options_sent_ = false;
   EngineController engine_;
 };
 

@@ -33,16 +33,14 @@
 namespace lczero {
 
 namespace {
-const OptionId kReuseTreeId{"reuse-tree", "ReuseTree",
-                            "Reuse the node statistics between moves."};
-const OptionId kResignPercentageId{
-    "resign-percentage", "ResignPercentage",
-    "Resign when win percentage drops below specified value.", 'r'};
+const char* kReuseTreeStr = "Reuse the node statistics between moves";
+const char* kResignPercentageStr = "Resign when win percentage drops below n";
 }  // namespace
 
 void SelfPlayGame::PopulateUciParams(OptionsParser* options) {
-  options->Add<BoolOption>(kReuseTreeId) = false;
-  options->Add<FloatOption>(kResignPercentageId, 0.0f, 100.0f) = 0.0f;
+  options->Add<BoolOption>(kReuseTreeStr, "reuse-tree") = false;
+  options->Add<FloatOption>(kResignPercentageStr, 0.0f, 100.0f,
+                            "resign-percentage", 'r') = 0.0f;
 }
 
 SelfPlayGame::SelfPlayGame(PlayerOptions player1, PlayerOptions player2,
@@ -59,8 +57,8 @@ SelfPlayGame::SelfPlayGame(PlayerOptions player1, PlayerOptions player2,
   }
 }
 
-void SelfPlayGame::Play(int white_threads, int black_threads, bool training,
-                        bool enable_resign) {
+void SelfPlayGame::Play(int white_threads, int black_threads,
+                        bool training, bool enable_resign) {
   bool blacks_move = false;
 
   // Do moves while not end of the game. (And while not abort_)
@@ -72,7 +70,7 @@ void SelfPlayGame::Play(int white_threads, int black_threads, bool training,
 
     // Initialize search.
     const int idx = blacks_move ? 1 : 0;
-    if (!options_[idx].uci_options->Get<bool>(kReuseTreeId.GetId())) {
+    if (!options_[idx].uci_options->Get<bool>(kReuseTreeStr)) {
       tree_[idx]->TrimTreeAtHead();
     }
     {
@@ -100,8 +98,7 @@ void SelfPlayGame::Play(int white_threads, int black_threads, bool training,
     if (eval < min_eval_[idx]) min_eval_[idx] = eval;
     if (enable_resign) {
       const float resignpct =
-          options_[idx].uci_options->Get<float>(kResignPercentageId.GetId()) /
-          100;
+          options_[idx].uci_options->Get<float>(kResignPercentageStr) / 100;
       if (eval < resignpct) {  // always false when resignpct == 0
         game_result_ =
             blacks_move ? GameResult::WHITE_WON : GameResult::BLACK_WON;

@@ -33,13 +33,13 @@
 #include "chess/callbacks.h"
 #include "chess/uciloop.h"
 #include "mcts/node.h"
-#include "mcts/params.h"
 #include "neural/cache.h"
 #include "neural/network.h"
 #include "syzygy/syzygy.h"
-#include "utils/logging.h"
 #include "utils/mutex.h"
 #include "utils/optional.h"
+#include "utils/optionsdict.h"
+#include "utils/optionsparser.h"
 
 namespace lczero {
 
@@ -47,7 +47,6 @@ struct SearchLimits {
   std::int64_t visits = -1;
   std::int64_t playouts = -1;
   std::int64_t time_ms = -1;
-  int depth = -1;
   bool infinite = false;
   MoveList searchmoves;
 };
@@ -61,6 +60,9 @@ class Search {
          SyzygyTablebase* syzygy_tb);
 
   ~Search();
+
+  // Populates UciOptions with search parameters.
+  static void PopulateUciParams(OptionsParser* options);
 
   // Starts worker threads and returns immediately.
   void StartThreads(size_t how_many);
@@ -86,6 +88,25 @@ class Search {
   // from the above function; with temperature enabled, these two functions may
   // return results from different possible moves.
   float GetBestEval() const;
+
+  // Strings for UCI params. So that others can override defaults.
+  // TODO(mooskagh) There are too many options for now. Factor out that into a
+  // separate class.
+  static const char* kMiniBatchSizeStr;
+  static const char* kMaxPrefetchBatchStr;
+  static const char* kCpuctStr;
+  static const char* kTemperatureStr;
+  static const char* kTempDecayMovesStr;
+  static const char* kTemperatureVisitOffsetStr;
+  static const char* kNoiseStr;
+  static const char* kVerboseStatsStr;
+  static const char* kAggressiveTimePruningStr;
+  static const char* kFpuReductionStr;
+  static const char* kCacheHistoryLengthStr;
+  static const char* kPolicySoftmaxTempStr;
+  static const char* kAllowedNodeCollisionsStr;
+  static const char* kOutOfOrderEvalStr;
+  static const char* kMultiPvStr;
 
  private:
   // Returns the best move, maybe with temperature (according to the settings).
@@ -163,7 +184,22 @@ class Search {
 
   BestMoveInfo::Callback best_move_callback_;
   ThinkingInfo::Callback info_callback_;
-  const SearchParams params_;
+  // External parameters.
+  const int kMiniBatchSize;
+  const int kMaxPrefetchBatch;
+  const float kCpuct;
+  const float kTemperature;
+  const float kTemperatureVisitOffset;
+  const int kTempDecayMoves;
+  const bool kNoise;
+  const bool kVerboseStats;
+  const float kAggressiveTimePruning;
+  const float kFpuReduction;
+  const int kCacheHistoryLength;
+  const float kPolicySoftmaxTemp;
+  const int kAllowedNodeCollisions;
+  const bool kOutOfOrderEval;
+  const int kMultiPv;
 
   friend class SearchWorker;
 };
@@ -173,12 +209,11 @@ class Search {
 // within one thread, have to split into stages.
 class SearchWorker {
  public:
-  SearchWorker(Search* search, const SearchParams& params)
-      : search_(search), history_(search_->played_history_), params_(params) {}
+  SearchWorker(Search* search)
+      : search_(search), history_(search_->played_history_) {}
 
   // Runs iterations while needed.
   void RunBlocking() {
-    LOGFILE << "Started search thread.";
     while (search_->IsSearchActive()) {
       ExecuteOneIteration();
     }
@@ -219,43 +254,18 @@ class SearchWorker {
 
  private:
   struct NodeToProcess {
-    bool IsExtendable() const { return !is_collision && !node->IsTerminal(); }
-    bool IsCollision() const { return is_collision; }
-    bool CanEvalOutOfOrder() const {
-      return is_cache_hit || node->IsTerminal();
-    }
-
-    // The node to extend.
+    NodeToProcess(Node* node, bool is_collision, uint16_t depth)
+        : node(node), depth(depth), is_collision(is_collision) {}
     Node* node;
     // Value from NN's value head, or -1/0/1 for terminal nodes.
     float v;
-    int multivisit = 0;
     uint16_t depth;
+    bool is_collision = false;
     bool nn_queried = false;
     bool is_cache_hit = false;
-    bool is_collision = false;
-
-    static NodeToProcess Collision(Node* node, uint16_t depth,
-                                   int collision_count) {
-      return NodeToProcess(node, depth, true, collision_count);
-    }
-    static NodeToProcess Extension(Node* node, uint16_t depth) {
-      return NodeToProcess(node, depth, false, 1);
-    }
-    static NodeToProcess TerminalHit(Node* node, uint16_t depth,
-                                     int visit_count) {
-      return NodeToProcess(node, depth, false, visit_count);
-    }
-
-   private:
-    NodeToProcess(Node* node, uint16_t depth, bool is_collision, int multivisit)
-        : node(node),
-          multivisit(multivisit),
-          depth(depth),
-          is_collision(is_collision) {}
   };
 
-  NodeToProcess PickNodeToExtend(int collision_limit);
+  NodeToProcess PickNodeToExtend();
   void ExtendNode(Node* node);
   bool AddNodeToComputation(Node* node, bool add_if_cached);
   int PrefetchIntoCache(Node* node, int budget);
@@ -271,7 +281,6 @@ class SearchWorker {
   PositionHistory history_;
   MoveList root_move_filter_;
   bool root_move_filter_populated_ = false;
-  const SearchParams& params_;
 };
 
 }  // namespace lczero

@@ -36,15 +36,15 @@
 
 namespace lczero {
 namespace {
-const OptionId kConfigFileId{"config", "ConfigFile",
-                             "Path to a configuration file.", 'c'};
+const char* kConfigFileStr = "Configuration file path";
 const char* kDefaultConfigFile = "lc0.config";
 }  // namespace
 
 std::vector<std::string> ConfigFile::arguments_;
 
 void ConfigFile::PopulateOptions(OptionsParser* options) {
-  options->Add<StringOption>(kConfigFileId) = kDefaultConfigFile;
+  options->Add<StringOption>(kConfigFileStr, "config", 'c') =
+      kDefaultConfigFile;
 }
 
 bool ConfigFile::Init(OptionsParser* options) {
@@ -55,9 +55,9 @@ bool ConfigFile::Init(OptionsParser* options) {
 
   // Calculate the relative path of the config file.
   OptionsDict dict = options->GetOptionsDict();
-  std::string filename = dict.Get<std::string>(kConfigFileId.GetId());
+  std::string filename = dict.Get<std::string>(kConfigFileStr);
 
-  // If filename is an empty string then return true.  This is to override
+  // If filename is an empty string then return true.  This is to override 
   // loading the default configuration file.
   if (filename == "") return true;
 
@@ -69,14 +69,12 @@ bool ConfigFile::Init(OptionsParser* options) {
   return true;
 }
 
-bool ConfigFile::ParseFile(const std::string& filename,
-                           OptionsParser* options) {
+bool ConfigFile::ParseFile(const std::string& filename, OptionsParser* options) {
   std::ifstream input(filename);
 
   // Check to see if we are using the default config file or not.
   OptionsDict dict = options->GetOptionsDict();
-  bool using_default_config =
-      dict.IsDefault<std::string>(kConfigFileId.GetId());
+  bool using_default_config = dict.IsDefault<std::string>(kConfigFileStr);
 
   if (!input.is_open()) {
     // It is okay if we cannot open the default file since it is normal

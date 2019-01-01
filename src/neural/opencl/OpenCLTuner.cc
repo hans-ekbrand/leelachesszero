@@ -223,7 +223,7 @@ std::string Tuner::tune_sgemm(const int m, const int n, const int k,
   auto cBuffer = cl::Buffer(m_context, CL_MEM_READ_WRITE,
                             sizeof(float) * c_size, nullptr, nullptr);
 
-  std::cerr << "Started OpenCL SGEMM tuner with batch size " << n / WINOGRAD_P
+  std::cerr << "Started OpenCL SGEMM tuner with batch size " << batch_size
             << "." << std::endl;
 
   auto valid_params = std::vector<int>{};
@@ -455,12 +455,8 @@ std::string Tuner::load_sgemm_tuners(const int m, const int n, const int k,
         auto tuners = sgemm_tuners_from_line(line, m, n, k, batch_size);
         if (tuners.size() != 0) {
           if (m_params.verbose) {
-            // batch_size argument is the number of batched sgemm calls, which
-            // equals the number of elements in one tile.
-            // Convolution batch size affects the "n" dimension of
-            // the matrix multiplication (n = WINOGRAD_P * batch_size).
-            std::cerr << "Loaded existing SGEMM tuning for batch size "
-                      << n / WINOGRAD_P << "." << std::endl;
+            std::cerr << "Loaded existing SGEMM tuning for batch_size "
+                      << batch_size << "." << std::endl;
           }
           return tuners;
         }
