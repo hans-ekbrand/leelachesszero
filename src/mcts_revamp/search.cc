@@ -31,10 +31,13 @@
 #include <fstream>
 #include <math.h>
 #include <iomanip>
+#include <atomic> // global depth is an atomic int
 
 #include "neural/encoder.h"
 
 namespace lczero {
+
+  std::atomic<int> full_tree_depth;
 
 namespace {
 
@@ -65,50 +68,34 @@ const char* Search_revamp::kAllowedNodeCollisionsStr =
 const char* Search_revamp::kOutOfOrderEvalStr = "Out-of-order cache backpropagation";
 const char* Search_revamp::kMultiPvStr = "MultiPV";
 
+
 void Search_revamp::PopulateUciParams(OptionsParser* options) {
   // Here the "safe defaults" are listed.
   // Many of them are overridden with optimized defaults in engine.cc and
   // tournament.cc
 
-  // HE 181231: When merging with "master" I had to change these from the four arguments version to the three arguments version.
-
-  // options->Add<IntOption>(kMiniBatchSizeStr, 1, 1024, "minibatch-size") = 1;
-  // options->Add<IntOption>(kMaxPrefetchBatchStr, 0, 1024, "max-prefetch") = 32;
-  // options->Add<FloatOption>(kCpuctStr, 0.0f, 100.0f, "cpuct") = 1.2f;
-  // options->Add<FloatOption>(kTemperatureStr, 0.0f, 100.0f, "temperature") =
-  //     0.0f;
-  // options->Add<FloatOption>(kTemperatureVisitOffsetStr, -0.99999f, 1000.0f,
-  //                           "temp-visit-offset") = 0.0f;
-  // options->Add<IntOption>(kTempDecayMovesStr, 0, 100, "tempdecay-moves") = 0;
-  // options->Add<BoolOption>(kNoiseStr, "noise", 'n') = false;
-  // options->Add<BoolOption>(kVerboseStatsStr, "verbose-move-stats") = false;
-  // options->Add<FloatOption>(kAggressiveTimePruningStr, 0.0f, 10.0f,
-  //                           "futile-search-aversion") = 1.33f;
-  // options->Add<FloatOption>(kFpuReductionStr, -100.0f, 100.0f,
-  //                           "fpu-reduction") = 0.0f;
-  // options->Add<IntOption>(kCacheHistoryLengthStr, 0, 7,
-  //                         "cache-history-length") = 7;
-  // options->Add<FloatOption>(kPolicySoftmaxTempStr, 0.1f, 10.0f,
-  //                           "policy-softmax-temp") = 1.0f;
-  // options->Add<IntOption>(kAllowedNodeCollisionsStr, 0, 1024,
-  //                         "allowed-node-collisions") = 0;
-  // options->Add<BoolOption>(kOutOfOrderEvalStr, "out-of-order-eval") = false;
-  // options->Add<IntOption>(kMultiPvStr, 1, 500, "multipv") = 1;
-  options->Add<IntOption>(kMiniBatchSizeStr, 1, 1024) = 1;
-  options->Add<IntOption>(kMaxPrefetchBatchStr, 0, 1024) = 32;
-  options->Add<FloatOption>(kCpuctStr, 0.0f, 100.0f) = 1.2f;
-  options->Add<FloatOption>(kTemperatureStr, 0.0f, 100.0f) = 0.0f;
-  options->Add<FloatOption>(kTemperatureVisitOffsetStr, -0.99999f, 1000.0f) = 0.0f;
-  options->Add<IntOption>(kTempDecayMovesStr, 0, 100) = 0;
-  options->Add<BoolOption>(kNoiseStr) = false;
-  options->Add<BoolOption>(kVerboseStatsStr) = false;
-  options->Add<FloatOption>(kAggressiveTimePruningStr, 0.0f, 10.0f) = 1.33f;
-  options->Add<FloatOption>(kFpuReductionStr, -100.0f, 100.0f) = 0.0f;
-  options->Add<IntOption>(kCacheHistoryLengthStr, 0, 7) = 7;
-  options->Add<FloatOption>(kPolicySoftmaxTempStr, 0.1f, 10.0f) = 1.0f;
-  options->Add<IntOption>(kAllowedNodeCollisionsStr, 0, 1024) = 0;
-  options->Add<BoolOption>(kOutOfOrderEvalStr) = false;
-  options->Add<IntOption>(kMultiPvStr, 1, 500) = 1;
+  options->Add<IntOption>(kMiniBatchSizeStr, 1, 1024, "minibatch-size") = 1;
+  options->Add<IntOption>(kMaxPrefetchBatchStr, 0, 1024, "max-prefetch") = 32;
+  options->Add<FloatOption>(kCpuctStr, 0.0f, 100.0f, "cpuct") = 1.2f;
+  options->Add<FloatOption>(kTemperatureStr, 0.0f, 100.0f, "temperature") =
+      0.0f;
+  options->Add<FloatOption>(kTemperatureVisitOffsetStr, -0.99999f, 1000.0f,
+                            "temp-visit-offset") = 0.0f;
+  options->Add<IntOption>(kTempDecayMovesStr, 0, 100, "tempdecay-moves") = 0;
+  options->Add<BoolOption>(kNoiseStr, "noise", 'n') = false;
+  options->Add<BoolOption>(kVerboseStatsStr, "verbose-move-stats") = false;
+  options->Add<FloatOption>(kAggressiveTimePruningStr, 0.0f, 10.0f,
+                            "futile-search-aversion") = 1.33f;
+  options->Add<FloatOption>(kFpuReductionStr, -100.0f, 100.0f,
+                            "fpu-reduction") = 0.0f;
+  options->Add<IntOption>(kCacheHistoryLengthStr, 0, 7,
+                          "cache-history-length") = 7;
+  options->Add<FloatOption>(kPolicySoftmaxTempStr, 0.1f, 10.0f,
+                            "policy-softmax-temp") = 1.0f;
+  options->Add<IntOption>(kAllowedNodeCollisionsStr, 0, 1024,
+                          "allowed-node-collisions") = 0;
+  options->Add<BoolOption>(kOutOfOrderEvalStr, "out-of-order-eval") = false;
+  options->Add<IntOption>(kMultiPvStr, 1, 500, "multipv") = 1;
 }
 
 Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
@@ -156,6 +143,9 @@ void Search_revamp::StartThreads(size_t how_many) {
 
   LOGFILE.open(LOGFILENAME);
 
+  // Set the global depth, for now start at 0 at every search. TODO remember this between moves.
+  full_tree_depth = 0;
+
   // create enough leaves so that each thread gets its own subtree
   int nleaf = 1;
   Node_revamp* current_node = root_node_;
@@ -172,7 +162,7 @@ void Search_revamp::StartThreads(size_t how_many) {
     threads_.emplace_back([this, current_node]()
      {
       SearchWorker_revamp worker(this, current_node);
-//      worker.RunBlocking();
+      // worker.RunBlocking();
       worker.RunBlocking2();
      }
     );
@@ -296,7 +286,7 @@ void SearchWorker_revamp::RunBlocking() {
       i++;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(73)); // optimised for 1060
+    std::this_thread::sleep_for(std::chrono::milliseconds(0)); // optimised for 1060
     LOGFILE << "RunNNComputation START ";
     start_comp_time_ = std::chrono::steady_clock::now();
 
@@ -340,46 +330,175 @@ void SearchWorker_revamp::RunBlocking() {
   delete [] minibatch;
 }
 
+  std::vector<float> SearchWorker_revamp::q_to_prob(std::vector<float> Q, int depth, float multiplier, float max_focus) {
+    // rebase depth from 0 to 1
+    depth++;
+    depth = sqrt(depth); // if we use full_tree_depth the distribution gets too sharp after a while
+    auto min_max = std::minmax_element(std::begin(Q), std::end(Q));
+    float min_q = Q[min_max.first-std::begin(Q)];
+    float max_q = Q[min_max.second-std::begin(Q)];
+    std::vector<float> a (Q.size());
+    std::vector<float> b (Q.size());
+    float c = 0;
+    std::vector<float> q_prob (Q.size());
+    for(long unsigned int i = 0; i < Q.size(); i++){
+      if(min_q < 0){
+	a[i] = (Q[i] - min_q) * (float)depth/(max_q - min_q);
+      } else {
+	a[i] = Q[i] * (float)depth/max_q;
+      }
+      b[i] = exp(multiplier * a[i]);
+    }
+    std::for_each(b.begin(), b.end(), [&] (float f) {
+    c += f;
+});
+    int index_best = 0;
+    int index_secondbest = 0;
+    for(long unsigned int i = 0; i < Q.size(); i++){
+      q_prob[i] = b[i]/c;
+      if(q_prob[i] > q_prob[index_best]){
+	index_secondbest = index_best;
+	index_best = i;
+      }
+    }
+    if(q_prob[index_best] > max_focus){
+      q_prob[index_best] = max_focus;
+      q_prob[index_secondbest] = 1 - max_focus;
+    }
+    return(q_prob);
+  }
+  
 // computes weights for the children based on average Qs (and possibly Ps) and, if there are unexpanded edges, a weight for the first unexpanded edge (the unexpanded with highest P)
 // weights are >= 0, sum of weights is 1
 // stored in weights_, idx corresponding to index in EdgeList
-// for now, weights are simply normalized Ps
-void SearchWorker_revamp::computeWeights(Node_revamp* node) {
+  void SearchWorker_revamp::computeWeights(Node_revamp* node, int depth) {
   double sum = 0.0;
   int n = node->GetNumChildren() + 1;
   if (n > node->GetNumEdges()) n = node->GetNumEdges();
 
   int widx = weights_.size();
 
-  for (int i = 0; i < n; i++) {
-//    weights_.push_back(1.0);
-    weights_.push_back((node->GetEdges())[i].GetP());
-    sum += weights_[widx + i];
+  bool DEBUG = false;
+  // if(depth == 0){
+  //   DEBUG = true;
+  // }
+
+  // For debugging
+  bool beta_to_move = (depth % 2 != 0);
+  if(DEBUG) {
+    std::cerr << "Depth: " << depth << "\n";
   }
-  if (sum > 0.0) {
-    float scale = (float)(1.0 / sum);
-    for (int i = 0; i < n; i++) {
-      weights_[widx + i] *= scale;
+
+  // If no child is extended, then just use P. 
+  if(n == 1 && (node->GetEdges())[0].GetChild() == nullptr){
+    // Shouldn't we just push 1 here, we _know_ that we want the child with the highest P.
+    // weights_.push_back((node->GetEdges())[0].GetP());
+    weights_.push_back(1);
+    sum += weights_[widx + 1];
+    if(DEBUG) {
+      std::cerr << "No child extended yet, use P \n";
+      float p = (node->GetEdges())[0].GetP();
+      std::cerr << "move: " << (node->GetEdges())[0].GetMove(beta_to_move).as_string() << " P: " << p << " \n";
     }
   } else {
-    float x = 1.0f / (float)n;
-    for (int i = 0; i < n; i++) {
-      weights_[widx + i] = x;
+    // At least one child is extended, weight by Q.
+
+    std::vector<float> Q_prob (n);
+    float multiplier = 3.0f;
+    float max_focus = 0.8f;    
+    std::vector<float> Q (n);
+
+    // Populate the vector Q, all but the last child already has it (or should have, right?)
+    for (int i = 0; i < n-1; i++) {
+      Q[i] = (node->GetEdges())[i].GetChild()->GetQ();
+
+      // band aid START occassionally Q isn't set. Probably a bug in backpropagation.
+      if(isnan((node->GetEdges())[i].GetChild()->GetQ())){
+	std::cerr << "Q wasn't set, this is child number: " << i << " of " << n-1 << " \n";
+	auto temp_node = (node->GetEdges())[i].GetChild();
+        bool has_children = temp_node->HasChildren();
+	if(!has_children){
+	  std::cerr << "this node wasn't extended \n"; // this never happens.
+	} else {
+	  std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << (node->GetEdges())[i].GetP() << "\n";	
+	  exit(1);
+	}
+	Q[i] = 0;
+      }
+      // band aid STOP
+      
+      if(DEBUG){
+	float p = (node->GetEdges())[i].GetP();
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << Q[i] << " \n";
+      }
+    }
+    
+    if((node->GetEdges())[n-1].GetChild() != nullptr){
+      // All children have a Q value
+      Q[n-1] = (node->GetEdges())[n-1].GetChild()->GetQ();
+    } else {
+      Q[n-1] = -0.05; // used in the rare case that q of better sibbling happens to be exactly 0.
+      // Simplistic estimate: let the ratio between the P values be the ratio of the q values too.
+      // If Q is below 1, then reverse the nominator and the denominator
+      if((node->GetEdges())[n-2].GetChild()->GetQ() > 0) {
+	Q[n-1] = (node->GetEdges())[n-2].GetChild()->GetQ() * (node->GetEdges())[n-1].GetP() / (node->GetEdges())[n-2].GetP();
+      } 
+      if((node->GetEdges())[n-2].GetChild()->GetQ() < 0) {
+	Q[n-1] = (node->GetEdges())[n-2].GetChild()->GetQ() * (node->GetEdges())[n-2].GetP() / (node->GetEdges())[n-1].GetP();	  
+      }
+    }
+    if(DEBUG){
+      float p = (node->GetEdges())[n-1].GetP();
+      std::cerr << "move: " << (node->GetEdges())[n-1].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << Q[n-1];
+      if((node->GetEdges())[n-1].GetChild() == nullptr){
+	std::cerr << " (estimated value) \n";
+      } else {
+	std::cerr << " \n";
+      }
+    }
+
+    Q_prob = q_to_prob(Q, full_tree_depth, multiplier, max_focus);
+    for(int i = 0; i < n; i++){
+      weights_.push_back(Q_prob[i]);
+      sum += weights_[widx + 1];
+      if(DEBUG){
+	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
+      }
     }
   }
+
+  // // Probably not needed anymore, since q_to_prob returns a vector with sum=1 and else there is only one alternative: highest P.
+  // if (sum > 0.0) {
+  //   float scale = (float)(1.0 / sum);
+  //   for (int i = 0; i < n; i++) {
+  //     weights_[widx + i] *= scale;
+  //   }
+  // } else {
+  //   float x = 1.0f / (float)n;
+  //   for (int i = 0; i < n; i++) {
+  //     weights_[widx + i] = x;
+  //   }
+  // }
 }
 
 // returns number of nodes added in sub tree root at current_node
-int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes) {
+int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth) {
   
   bool const DEBUG = false;
-  
+  if (depth > full_tree_depth){
+    // lock max_depth and update it
+    if(DEBUG) { std::cerr << "New max_depth reached " << full_tree_depth << "\n"; }
+    std::cerr << "New max_depth reached " << full_tree_depth << "\n";
+    full_tree_depth = depth;
+  }
+
   int orig_noof_nodes = noof_nodes;
 
   nodestack_.push_back(current_node);
   
-  int widx = weights_.size();
-  computeWeights(current_node);
+  long unsigned int widx = weights_.size();
+  computeWeights(current_node, depth); // full_tree_depth is an alternative
+  // computeWeights(current_node, full_tree_depth); // full_tree_depth is an alternative  
   int ntot = current_node->GetN() - 1;
   int ntotafter = ntot + noof_nodes;
   int npos = 0;
@@ -393,8 +512,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       weights_[widx + i] = 0.0;
     }
   }
-  
-  
+
   if (DEBUG) {
     std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
     for (int i = widx; i < (int)weights_.size(); i++) {
@@ -436,7 +554,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
   
-  for (int i = 0; i < (int)weights_.size() - widx; i++) {
+  for (int i = 0; i < (int)weights_.size() - (int)widx; i++) {
     double w = (double)weights_[widx + i];
     if (w > 0.0) {
       int n = (current_node->GetEdges())[i].GetChild()->GetN();
@@ -455,7 +573,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
 
         if (DEBUG) std::cerr << "rec call\n";
 
-        nnewnodes += pickNodesToExtend((current_node->GetEdges())[i].GetChild(), ai);
+        nnewnodes += pickNodesToExtend((current_node->GetEdges())[i].GetChild(), ai, depth+1);
         history_.Pop();
 
         if (DEBUG) std::cerr << "return rec call\n";
@@ -474,7 +592,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
     weights_.pop_back();
   }
 
-  if ((int)weights_.size() != widx) {
+  if ((int)weights_.size() != (int)widx) {
     std::cerr << "weights_.size() != widx\n";
   }
 
@@ -554,13 +672,29 @@ void SearchWorker_revamp::RunBlocking2() {
 
     //~ std::cerr << "n: " << worker_root_->GetN() << "\n";
 
-    pickNodesToExtend(worker_root_, search_->kMiniBatchSize);
+    pickNodesToExtend(worker_root_, search_->kMiniBatchSize, 0);
 
     //~ std::cerr << "weights_.size(): " << weights_.size() << "\n";
     
     std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(0));
+    LOGFILE << "RunNNComputation START ";
+    start_comp_time_ = std::chrono::steady_clock::now();
+
     computation2_->ComputeBlocking();
+
+    stop_comp_time_ = std::chrono::steady_clock::now();
+    auto duration = stop_comp_time_ - start_comp_time_;
+    LOGFILE << "RunNNComputation STOP nanoseconds used: " << duration.count() << "; ";
+    int idx_in_computation = minibatch_.size();
+    int duration_mu = duration.count();
+    if(duration_mu > 0){
+      float better_duration = duration_mu / 1000;
+      float nps = 1000 * idx_in_computation / better_duration;
+      LOGFILE << " nodes in last batch that were evaluated " << idx_in_computation << " nps " << 1000 * nps << "\n";
+    }
+    
     
     std::cerr << " done\n";
 
