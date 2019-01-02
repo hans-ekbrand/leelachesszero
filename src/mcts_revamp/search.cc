@@ -344,6 +344,7 @@ void SearchWorker_revamp::RunBlocking() {
       for(int i = 0; i < (int)Q.size(); i++){
 	q_prob[i] = 1.0f/Q.size();
       }
+      assert(std::accumulate(q_prob.begin(), q_prob.end(), 0) == 1);      
       return(q_prob);
     }
     std::vector<float> a (Q.size());
@@ -479,9 +480,9 @@ void SearchWorker_revamp::RunBlocking() {
     for(int i = 0; i < n; i++){
       weights_.push_back(Q_prob[i]);
       sum += weights_[widx + 1];
-      if(DEBUG){
-	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
-      }
+      // if(DEBUG){
+      // 	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " Q as prob: " << Q_prob[i] << "\n";
+      // }
     }
   }
 
@@ -516,7 +517,8 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   long unsigned int widx = weights_.size();
   computeWeights(current_node, depth); // full_tree_depth is an alternative
-  // computeWeights(current_node, full_tree_depth); // full_tree_depth is an alternative  
+
+  // computeWeights(current_node, full_tree_depth); // full_tree_depth is an alternative
   int ntot = current_node->GetN() - 1;
   int ntotafter = ntot + noof_nodes;
   int npos = 0;
@@ -542,7 +544,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
     }
     std::cerr << "\n";
   }
-  
+
   int nnewnodes = 0;
   if (weights_.size() - widx > current_node->GetNumChildren()) {  // there is an unexpanded edge to potentially extend
     int idx = current_node->GetNumChildren();
@@ -564,6 +566,9 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
         if (DEBUG) std::cerr << "Adding child to batch\n";
 
         noof_nodes--;  // could alternatively be noof_nodes -= ai but that would mean more frequent under full batches
+      } else {
+      	LOGFILE << "Got a terminal node! \n";
+	std::cerr << "Got a terminal node. Will segfault! \n";	
       }
       history_.Pop();
     }
@@ -662,7 +667,7 @@ void SearchWorker_revamp::recalcPropagatedQ(Node_revamp* node) {
   if(!isnan(- q / (double)(node->GetN() - 1))){
     node->SetQ(- q / (double)(node->GetN() - 1));
   } else {
-    std::cerr << "Q is not a number, it is:" << - q / (double)(node->GetN() - 1) << " q:" << q << " denominator:" << (double)(node->GetN() - 1);
+    std::cerr << "Q is not a number, it is:" << - q / (double)(node->GetN() - 1) << " q:" << q << " denominator:" << (double)(node->GetN() - 1) << "\n";
   }
 }
 
@@ -696,7 +701,7 @@ void SearchWorker_revamp::RunBlocking2() {
     //~ std::cerr << "n: " << worker_root_->GetN() << "\n";
 
     pickNodesToExtend(worker_root_, search_->kMiniBatchSize, 0);
-
+	
     //~ std::cerr << "weights_.size(): " << weights_.size() << "\n";
     
     std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
