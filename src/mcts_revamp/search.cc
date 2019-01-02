@@ -32,6 +32,7 @@
 #include <math.h>
 #include <iomanip>
 #include <atomic> // global depth is an atomic int
+#include <numeric> // accumulate()
 
 #include "neural/encoder.h"
 
@@ -337,34 +338,69 @@ void SearchWorker_revamp::RunBlocking() {
     auto min_max = std::minmax_element(std::begin(Q), std::end(Q));
     float min_q = Q[min_max.first-std::begin(Q)];
     float max_q = Q[min_max.second-std::begin(Q)];
+    std::vector<float> q_prob (Q.size());    
+    if(max_q - min_q == 0){
+      // Return the uniform distribution
+      for(int i = 0; i < (int)Q.size(); i++){
+	q_prob[i] = 1.0f/Q.size();
+      }
+      return(q_prob);
+    }
     std::vector<float> a (Q.size());
     std::vector<float> b (Q.size());
     float c = 0;
-    std::vector<float> q_prob (Q.size());
-    for(long unsigned int i = 0; i < Q.size(); i++){
+    for(int i = 0; i < (int)Q.size(); i++){
       if(min_q < 0){
 	a[i] = (Q[i] - min_q) * (float)depth/(max_q - min_q);
+	// a[i] = (Q[i] - min_q)/(max_q - min_q);	
       } else {
 	a[i] = Q[i] * (float)depth/max_q;
+	// a[i] = Q[i]/max_q;
       }
       b[i] = exp(multiplier * a[i]);
     }
     std::for_each(b.begin(), b.end(), [&] (float f) {
     c += f;
 });
-    int index_best = 0;
-    int index_secondbest = 0;
-    for(long unsigned int i = 0; i < Q.size(); i++){
+    for(int i = 0; i < (int)Q.size(); i++){
       q_prob[i] = b[i]/c;
-      if(q_prob[i] > q_prob[index_best]){
-	index_secondbest = index_best;
-	index_best = i;
+    }
+    if(q_prob[min_max.second-std::begin(Q)] > max_focus){
+      // std::cerr << "limiting p to max_focus because " << q_prob[min_max.second-std::begin(Q)] << " is more than " << max_focus << "\n";
+      // find index of the second best.
+      std::vector<float> q_prob_copy = q_prob;
+      // Turn the second into the best by setting the max to the min in the copy
+      // std::cerr << "Setting the best (at: " << min_max.second-std::begin(Q) << ") to " << q_prob_copy[min_max.second-std::begin(Q)] << " to the worst: " << q_prob_copy[min_max.first-std::begin(Q)] << "\n";
+      q_prob_copy[min_max.second-std::begin(Q)] = q_prob_copy[min_max.first-std::begin(Q)] - 1.0f;
+      auto second_best = std::max_element(std::begin(q_prob_copy), std::end(q_prob_copy));
+      q_prob[min_max.second-std::begin(Q)] = max_focus;
+      // std::cerr << "Setting the second best (at: " << second_best-std::begin(q_prob_copy) << ") " << q_prob[second_best-std::begin(q_prob_copy)] << " to the 1 - max_focus: \n";
+      q_prob[second_best-std::begin(q_prob_copy)] = 1 - max_focus;
+      // Set all the others to zero
+      for(int i = 0; i < (int)Q.size(); i++){
+	if(i != min_max.second-std::begin(Q) && i != second_best-std::begin(q_prob_copy)){
+	  q_prob[i] = 0;
+	}
       }
     }
-    if(q_prob[index_best] > max_focus){
-      q_prob[index_best] = max_focus;
-      q_prob[index_secondbest] = 1 - max_focus;
-    }
+    // std::sort(q_prob.begin(), q_prob.end(), std::greater<>());
+    // if(q_prob[0] > max_focus){
+    //   std::cerr << "limiting p to max_focus because " << q_prob[0] << " is more than " << max_focus << "\n";
+    //   // limit p to max focus, give 1 - max_focus to second best and that's it.
+    //   for(int i = 0; i < (int)Q.size(); i++){
+    // 	if(i == 1){
+    // 	  q_prob[i] = max_focus;
+    // 	} else {
+    // 	  if(i == 2){
+    // 	    q_prob[i] = 1 - max_focus;
+    // 	  } else {
+    // 	    q_prob[i] = 0;
+    // 	  }
+    // 	}
+    //   }
+    // }
+    // Does it sum to 1?
+    assert(std::accumulate(q_prob.begin(), q_prob.end(), 0) == 1);
     return(q_prob);
   }
   
@@ -405,7 +441,7 @@ void SearchWorker_revamp::RunBlocking() {
 
     std::vector<float> Q_prob (n);
     float multiplier = 3.0f;
-    float max_focus = 0.8f;    
+    float max_focus = 0.80f;    
     std::vector<float> Q (n);
 
     // Populate the vector Q, all but the last child already has it (or should have, right?)
