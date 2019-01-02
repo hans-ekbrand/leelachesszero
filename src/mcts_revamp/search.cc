@@ -427,8 +427,6 @@ void SearchWorker_revamp::RunBlocking() {
 
   // If no child is extended, then just use P. 
   if(n == 1 && (node->GetEdges())[0].GetChild() == nullptr){
-    // Shouldn't we just push 1 here, we _know_ that we want the child with the highest P.
-    // weights_.push_back((node->GetEdges())[0].GetP());
     weights_.push_back(1);
     sum += weights_[widx + 1];
     if(DEBUG) {
@@ -447,22 +445,6 @@ void SearchWorker_revamp::RunBlocking() {
     // Populate the vector Q, all but the last child already has it (or should have, right?)
     for (int i = 0; i < n-1; i++) {
       Q[i] = (node->GetEdges())[i].GetChild()->GetQ();
-
-      // band aid START occassionally Q isn't set. Probably a bug in backpropagation.
-      if(isnan((node->GetEdges())[i].GetChild()->GetQ())){
-	std::cerr << "Q wasn't set, this is child number: " << i << " of " << n-1 << " \n";
-	auto temp_node = (node->GetEdges())[i].GetChild();
-        bool has_children = temp_node->HasChildren();
-	if(!has_children){
-	  std::cerr << "this node wasn't extended \n"; // this never happens.
-	} else {
-	  std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << (node->GetEdges())[i].GetP() << "\n";	
-	  exit(1);
-	}
-	Q[i] = 0;
-      }
-      // band aid STOP
-      
       if(DEBUG){
 	float p = (node->GetEdges())[i].GetP();
 	std::cerr << "move: " << (node->GetEdges())[i].GetMove(beta_to_move).as_string() << " P: " << p << " Q: " << Q[i] << " \n";
@@ -676,7 +658,12 @@ void SearchWorker_revamp::recalcPropagatedQ(Node_revamp* node) {
     Node_revamp* child = (node->GetEdges())[i].GetChild();
     q += child->GetQ() * (double)child->GetN();
   }
-  node->SetQ(- q / (double)(node->GetN() - 1));
+  // both q and node->GetN() - 1 can be zero
+  if(!isnan(- q / (double)(node->GetN() - 1))){
+    node->SetQ(- q / (double)(node->GetN() - 1));
+  } else {
+    std::cerr << "Q is not a number, it is:" << - q / (double)(node->GetN() - 1) << " q:" << q << " denominator:" << (double)(node->GetN() - 1);
+  }
 }
 
 void SearchWorker_revamp::RunBlocking2() {
