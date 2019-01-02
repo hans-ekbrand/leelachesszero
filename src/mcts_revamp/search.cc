@@ -440,7 +440,7 @@ void SearchWorker_revamp::RunBlocking() {
     // At least one child is extended, weight by Q.
 
     std::vector<float> Q_prob (n);
-    float multiplier = 3.0f;
+    float multiplier = 2.8f;
     float max_focus = 0.80f;    
     std::vector<float> Q (n);
 
