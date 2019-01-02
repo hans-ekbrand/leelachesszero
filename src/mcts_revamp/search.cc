@@ -32,6 +32,7 @@
 #include <math.h>
 #include <iomanip>
 #include <atomic> // global depth is an atomic int
+#include <numeric> // accumulate()
 
 #include "neural/encoder.h"
 
@@ -337,11 +338,18 @@ void SearchWorker_revamp::RunBlocking() {
     auto min_max = std::minmax_element(std::begin(Q), std::end(Q));
     float min_q = Q[min_max.first-std::begin(Q)];
     float max_q = Q[min_max.second-std::begin(Q)];
+    std::vector<float> q_prob (Q.size());    
+    if(max_q - min_q == 0){
+      // Return the uniform distribution
+      for(int i = 0; i < (int)Q.size(); i++){
+	q_prob[i] = 1.0f/Q.size();
+      }
+      return(q_prob);
+    }
     std::vector<float> a (Q.size());
     std::vector<float> b (Q.size());
     float c = 0;
-    std::vector<float> q_prob (Q.size());
-    for(long unsigned int i = 0; i < Q.size(); i++){
+    for(int i = 0; i < (int)Q.size(); i++){
       if(min_q < 0){
 	a[i] = (Q[i] - min_q) * (float)depth/(max_q - min_q);
       } else {
@@ -352,19 +360,26 @@ void SearchWorker_revamp::RunBlocking() {
     std::for_each(b.begin(), b.end(), [&] (float f) {
     c += f;
 });
-    int index_best = 0;
-    int index_secondbest = 0;
-    for(long unsigned int i = 0; i < Q.size(); i++){
+    for(int i = 0; i < (int)Q.size(); i++){
       q_prob[i] = b[i]/c;
-      if(q_prob[i] > q_prob[index_best]){
-	index_secondbest = index_best;
-	index_best = i;
+    }
+    std::sort(q_prob.begin(), q_prob.end(), std::greater<>());
+    if(q_prob[0] > max_focus){
+      // cap at max focus, give 1 - max_focus to second best and that's it.
+      for(int i = 0; i < (int)Q.size(); i++){
+	if(i == 1){
+	  q_prob[i] = max_focus;
+	} else {
+	  if(i == 2){
+	    q_prob[i] = 1 - max_focus;
+	  } else {
+	    q_prob[i] = 0;
+	  }
+	}
       }
     }
-    if(q_prob[index_best] > max_focus){
-      q_prob[index_best] = max_focus;
-      q_prob[index_secondbest] = 1 - max_focus;
-    }
+    // Does it sum to 1?
+    assert(std::accumulate(q_prob.begin(), q_prob.end(), 0) == 1);
     return(q_prob);
   }
   
@@ -404,8 +419,8 @@ void SearchWorker_revamp::RunBlocking() {
     // At least one child is extended, weight by Q.
 
     std::vector<float> Q_prob (n);
-    float multiplier = 3.0f;
-    float max_focus = 0.8f;    
+    float multiplier = 2.7f;
+    float max_focus = 0.64f;    
     std::vector<float> Q (n);
 
     // Populate the vector Q, all but the last child already has it (or should have, right?)
