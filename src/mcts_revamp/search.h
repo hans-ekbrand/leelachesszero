@@ -126,6 +126,7 @@ private:
   Network* const network_;
   const SearchLimits_revamp limits_;
 
+  BestMoveInfo::Callback best_move_callback_;
   // External parameters
   const int kMiniBatchSize;
   const int kCacheHistoryLength;

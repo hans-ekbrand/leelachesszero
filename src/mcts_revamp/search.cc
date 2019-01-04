@@ -48,6 +48,8 @@ namespace {
   const char* LOGFILENAME = "lc0.log";
   std::ofstream LOGFILE;
 
+  bool const PRINT = false;
+
 }  // namespace
 
 const char* Search_revamp::kMiniBatchSizeStr = "Minibatch size for NN inference";
@@ -113,7 +115,7 @@ Search_revamp::Search_revamp(const NodeTree_revamp& tree, Network* network,
       limits_(limits),
       //~ start_time_(std::chrono::steady_clock::now()),
       //~ initial_visits_(root_node_->GetN()),
-      //~ best_move_callback_(best_move_callback),
+      best_move_callback_(best_move_callback),
       //~ info_callback_(info_callback),
       kMiniBatchSize(options.Get<int>(kMiniBatchSizeStr)),
       //~ kMaxPrefetchBatch(options.Get<int>(kMaxPrefetchBatchStr)),
@@ -140,7 +142,7 @@ void Search_revamp::StartThreads(size_t how_many) {
     //~ return;
   //~ }
 
-  std::cerr << "Letting " << how_many << " threads create " << limits_.visits << " nodes each\n";
+  if (PRINT) std::cerr << "Letting " << how_many << " threads create " << limits_.visits << " nodes each\n";
 
   LOGFILE.open(LOGFILENAME);
 
@@ -226,6 +228,21 @@ void Search_revamp::Abort() {
 }
 */
 
+namespace {
+int indexOfBiggestSubtree(Node_revamp* node) {
+  int bestsize = 0;
+  int bestidx = -1;
+  for (int i = 0; i < node->GetNumChildren(); i++) {
+    int n = node->GetEdges()[i].GetChild()->GetN();
+    if (n > bestsize) {
+      bestsize = n;
+      bestidx = i;
+    }
+  }
+  return bestidx;
+}
+}
+
 void Search_revamp::Wait() {
   Mutex::Lock lock(threads_mutex_);
   while (!threads_.empty()) {
@@ -260,7 +277,7 @@ Search_revamp::~Search_revamp() {
 
 
 void SearchWorker_revamp::RunBlocking() {
-  std::cerr << "Running thread for node " << worker_root_ << "\n";
+  if (PRINT) std::cerr << "Running thread for node " << worker_root_ << "\n";
 
   Node_revamp *current_node = worker_root_;
   int lim = search_->limits_.visits;
@@ -311,7 +328,7 @@ void SearchWorker_revamp::RunBlocking() {
       float total = 0.0;
       int nedge = node->GetNumEdges();
       if (nedge > MAXNEDGE) {
-        std::cerr << "Too many edges\n";
+        if (PRINT) std::cerr << "Too many edges\n";
         nedge = MAXNEDGE;
       }
       for (int k = 0; k < nedge; k++) {
@@ -325,8 +342,10 @@ void SearchWorker_revamp::RunBlocking() {
       }
     }
   }
+  if (PRINT) {
   int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
   std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished " << i << " nodes and " << ic << " computations: " << elapsed_time << "ms\n";
+  } // PRINT
 
   delete [] minibatch;
 }
@@ -505,7 +524,7 @@ float q_to_w(float q, float mean, float stddev) {
   if (stddev < 1e-5) {
     return 1.0;
   } else {
-    return exp(1.5 * (q - mean) / stddev);
+    return exp(1.0 * (q - mean) / stddev);
   }
 }
 }
@@ -573,18 +592,18 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   int snw = current_node->GetNumChildren() + 1;
   if (snw > current_node->GetNumEdges()) snw--;
   if (nw != snw) {
-    std::cerr << "nw != snw, nw: " << nw << ", snw: " << snw << "\n";
+    if (PRINT) std::cerr << "nw != snw, nw: " << nw << ", snw: " << snw << "\n";
   }
   
   float tw = 0.0;
   for (int i = 0; i < nw; i++) {
     tw += weights_[widx + i];
     if (weights_[widx + i] < 0.0) {
-      std::cerr << "w = " << weights_[widx + i] << " < 0\n";
+      if (PRINT) std::cerr << "w = " << weights_[widx + i] << " < 0\n";
     }
   }
   if (abs(tw - 1.0) > 1e-5) {
-    std::cerr << "tw = " << tw << "\n";
+    if (PRINT) std::cerr << "tw = " << tw << "\n";
   }
 
   // computeWeights(current_node, full_tree_depth); // full_tree_depth is an alternative
@@ -613,7 +632,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
 
         noof_nodes--;
       } else {
-        std::cerr << "Terminal node created\n";	
+        if (PRINT) std::cerr << "Terminal node created\n";	
       }
       history_.Pop();
     }
@@ -644,7 +663,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       weights_[widx + minidx] = -1.0;
       count_pos--;
       if (count_pos <= 0) {
-        std::cerr << "count_pos: " << count_pos << ", noof_nodes: " << noof_nodes << "\n";
+        if (PRINT) std::cerr << "count_pos: " << count_pos << ", noof_nodes: " << noof_nodes << "\n";
       }
     } else {
       break;
@@ -727,10 +746,10 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       }
     }
     if (abs(ssw - weightpos) > 1e-5) {
-      std::cerr << "ssw: " << ssw << ", weightpos: " << weightpos << "\n";
+      if (PRINT) std::cerr << "ssw: " << ssw << ", weightpos: " << weightpos << "\n";
     }
     if (ssnp != npos) {
-      std::cerr << "ssnp: " << ssnp << ", npos: " << npos << "\n";
+      if (PRINT) std::cerr << "ssnp: " << ssnp << ", npos: " << npos << "\n";
     }
 
     float w = weights_[widx + i];
@@ -741,14 +760,16 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
       if (DEBUG) std::cerr << "Child " << i << ", ai: " << ai << "\n";
       
       if (ai < 0) {
-        std::cerr << "ai: " << ai << "\n";
+        if (PRINT) std::cerr << "ai: " << ai << "\n";
       }
 
       if (ai > noof_nodes) {
+        if (PRINT) {
         std::cerr << "ai > noof_nodes, ai: " << ai << ", noof_nodes: " << noof_nodes << "\n";
         std::cerr << "ssw: " << ssw << ", weightpos: " << weightpos << "\n";
         std::cerr << "ssnp: " << ssnp << ", npos: " << npos << "\n";
         std::cerr << "n: " << n << ", w: " << w << "\n";
+        } // PRINT
         ai = noof_nodes;
       }
       if (ai >= 1) {
@@ -772,6 +793,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   // noof_nodes unchanged if sub tree is exhausted (node has no edges (terminal) or all unexpanded descendants are terminal)
   // noof_nodes > 0 if not enough nodes were added to children or no children and new child is terminal
 
+  if (PRINT) {
   if (abs(weightpos) > 1e-5 || npos != 0) {
     std::cerr << "weightpos: " << weightpos << "\n";
     std::cerr << "npos: " << npos << "\n";
@@ -780,6 +802,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   if (noof_nodes != 0 && nw > 0) {
     std::cerr << "noof_nodes = " << noof_nodes << "\n";
   }
+  } // PRINT
 
 }
 
@@ -791,9 +814,11 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   current_node->IncreaseN(nnewnodes);
 
 
+  if (PRINT) {
   if (nnewnodes > orig_noof_nodes) {
     std::cerr << "new nodes: " << nnewnodes << ", should be: " << orig_noof_nodes << "\n";
   }
+  } // PRINT
 
   return nnewnodes;
 }
@@ -807,7 +832,7 @@ void SearchWorker_revamp::retrieveNNResult(Node_revamp* node, int batchidx) {
   for (int k = 0; k < nedge; k++) {
     float p = computation2_->GetPVal(batchidx, (node->GetEdges())[k].GetMove().as_nn_index());
     if (p < 0.0) {
-      std::cerr << "p value < 0\n";
+      if (PRINT) std::cerr << "p value < 0\n";
       p = 0.0;
     }
     pvals_.push_back(p);
@@ -837,12 +862,12 @@ void SearchWorker_revamp::recalcPropagatedQ(Node_revamp* node) {
   if(!isnan(- q / (double)(node->GetN() - 1))){
     node->SetQ(- q / (double)(node->GetN() - 1));
   } else {
-    std::cerr << "Q is not a number, it is:" << - q / (double)(node->GetN() - 1) << " q:" << q << " denominator:" << (double)(node->GetN() - 1) << "\n";
+    if (PRINT) std::cerr << "Q is not a number, it is:" << - q / (double)(node->GetN() - 1) << " q:" << q << " denominator:" << (double)(node->GetN() - 1) << "\n";
   }
 }
 
 void SearchWorker_revamp::RunBlocking2() {
-  std::cerr << "Running thread for node " << worker_root_ << "\n";
+  if (PRINT) std::cerr << "Running thread for node " << worker_root_ << "\n";
   const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
 
   int lim = search_->limits_.visits;
@@ -851,15 +876,15 @@ void SearchWorker_revamp::RunBlocking2() {
   if (worker_root_->GetNumEdges() == 0 && !worker_root_->IsTerminal()) {  // root node not extended
     worker_root_->ExtendNode(&history_);
     if (worker_root_->IsTerminal()) {
-      std::cerr << "Root " << worker_root_ << " is terminal, nothing to do\n";
+      if (PRINT) std::cerr << "Root " << worker_root_ << " is terminal, nothing to do\n";
       return;
     }
     minibatch_.clear();
     computation2_ = search_->network_->NewComputation();
     AddNodeToComputation2();
-    std::cerr << "Computing thread root ..";
+    if (PRINT) std::cerr << "Computing thread root ..";
     computation2_->ComputeBlocking();
-    std::cerr << " done\n";
+    if (PRINT) std::cerr << " done\n";
     retrieveNNResult(worker_root_, 0);
     i++;
   }
@@ -874,7 +899,7 @@ void SearchWorker_revamp::RunBlocking2() {
 	
     //~ std::cerr << "weights_.size(): " << weights_.size() << "\n";
     
-    std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
+    if (PRINT) std::cerr << "Computing batch of size " << minibatch_.size() << " ..";
 
     std::this_thread::sleep_for(std::chrono::milliseconds(0));
     LOGFILE << "RunNNComputation START ";
@@ -894,7 +919,7 @@ void SearchWorker_revamp::RunBlocking2() {
     }
     
     
-    std::cerr << " done\n";
+    if (PRINT) std::cerr << " done\n";
 
     i += minibatch_.size();  // == computation2_->GetBatchSize()
     
@@ -909,6 +934,7 @@ void SearchWorker_revamp::RunBlocking2() {
     }
   }
 
+  if (PRINT) {
   int64_t elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
   std::cerr << "Elapsed time when thread for node " << worker_root_ << " finished " << worker_root_->GetN() << " nodes and " << i << " computations: " << elapsed_time << "ms\n";
 
@@ -937,6 +963,13 @@ void SearchWorker_revamp::RunBlocking2() {
   }
   
   weights_.clear();
+  }  // PRINT
+
+  int bestidx = indexOfBiggestSubtree(search_->root_node_);
+  Move best_move = search_->root_node_->GetEdges()[bestidx].GetMove();
+  int ponderidx = indexOfBiggestSubtree(search_->root_node_->GetEdges()[bestidx].GetChild());
+  Move ponder_move = search_->root_node_->GetEdges()[bestidx].GetChild()->GetEdges()[ponderidx].GetMove(true);
+  search_->best_move_callback_({best_move, ponder_move});
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
