@@ -153,6 +153,7 @@ class SearchWorker_revamp {
   void retrieveNNResult(Node_revamp* node, int batchidx);
   void recalcPropagatedQ(Node_revamp* node);
   void computeWeights(Node_revamp* node, int depth);
+  void computeWeights2(Node_revamp* node);
   int pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth);
   std::vector<float> q_to_prob(std::vector<float> Q, int d, float multiplier, float max_focus);
 

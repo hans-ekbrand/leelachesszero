@@ -500,6 +500,55 @@ void SearchWorker_revamp::RunBlocking() {
   // }
 }
 
+namespace {
+float q_to_w(float q, float mean, float stddev) {
+  if (stddev < 1e-5) {
+    return 1.0;
+  } else {
+    return exp(1.5 * (q - mean) / stddev);
+  }
+}
+}
+
+void SearchWorker_revamp::computeWeights2(Node_revamp* node) {
+  double sum1 = 0.0;
+  double sum2 = 0.0;
+  int n = node->GetNumChildren();
+  
+  if (n == 0) {
+    // there must be an unexpanded edge
+    weights_.push_back(1.0);
+  } else {
+    float mean = 0.0;
+    for (int i = 0; i < n; i++) {
+      mean += node->GetEdges()[i].GetChild()->GetQ();
+    }
+    mean /= (float)n;
+    
+    float stddev = 0.0;
+    for (int i = 0; i < n; i++) {
+      stddev += abs(node->GetEdges()[i].GetChild()->GetQ() - mean);
+    }
+    stddev /= (float)n;
+    
+    for (int i = 0; i < n; i++) {
+      sum1 += q_to_w(node->GetEdges()[i].GetChild()->GetQ(), mean, stddev);
+      sum2 += node->GetEdges()[i].GetP();
+    }
+    if (node->GetNumEdges() > node->GetNumChildren()) {
+      double sum3 = sum2 + node->GetEdges()[node->GetNumChildren()].GetP();
+      for (int i = 0; i < n; i++) {
+        weights_.push_back(q_to_w(node->GetEdges()[i].GetChild()->GetQ(), mean, stddev) / sum1 * sum2 / sum3);
+      }
+      weights_.push_back((sum3 - sum2) / sum3);
+    } else {
+      for (int i = 0; i < n; i++) {
+        weights_.push_back(q_to_w(node->GetEdges()[i].GetChild()->GetQ(), mean, stddev) / sum1);
+      }
+    }
+  }
+}
+
 // returns number of nodes added in sub tree root at current_node
 int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_nodes, int depth) {
   
@@ -507,7 +556,7 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   if (depth > full_tree_depth){
     // lock max_depth and update it
     if(DEBUG) { std::cerr << "New max_depth reached " << full_tree_depth << "\n"; }
-    std::cerr << "New max_depth reached " << full_tree_depth << "\n";
+//  std::cerr << "New max_depth reached " << full_tree_depth << "\n";
     full_tree_depth = depth;
   }
 
@@ -517,43 +566,40 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   
   long unsigned int widx = weights_.size();
   computeWeights(current_node, depth); // full_tree_depth is an alternative
+  //computeWeights2(current_node);
+
+  int nw = weights_.size() - widx;
+
+  int snw = current_node->GetNumChildren() + 1;
+  if (snw > current_node->GetNumEdges()) snw--;
+  if (nw != snw) {
+    std::cerr << "nw != snw, nw: " << nw << ", snw: " << snw << "\n";
+  }
+  
+  float tw = 0.0;
+  for (int i = 0; i < nw; i++) {
+    tw += weights_[widx + i];
+    if (weights_[widx + i] < 0.0) {
+      std::cerr << "w = " << weights_[widx + i] << " < 0\n";
+    }
+  }
+  if (abs(tw - 1.0) > 1e-5) {
+    std::cerr << "tw = " << tw << "\n";
+  }
 
   // computeWeights(current_node, full_tree_depth); // full_tree_depth is an alternative
-  int ntot = current_node->GetN() - 1;
-  int ntotafter = ntot + noof_nodes;
-  int npos = 0;
-  double weightpos = 0.0;
-  for (int i = 0; i < current_node->GetNumChildren(); i++) {
-    int n = (current_node->GetEdges())[i].GetChild()->GetN();
-    if ((double)ntotafter * (double)weights_[widx + i] - (double)n > 0.0) {
-      npos += n;
-      weightpos += (double)weights_[widx + i];
-    } else {
-      weights_[widx + i] = 0.0;
-    }
-  }
-
-  if (DEBUG) {
-    std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
-    for (int i = widx; i < (int)weights_.size(); i++) {
-      std::cerr << " " << weights_[i];
-    }
-    std::cerr << "\n";
-    for (int i = 0; i < current_node->GetNumChildren(); i++) {
-      std::cerr << " " << (current_node->GetEdges())[i].GetChild()->GetN();
-    }
-    std::cerr << "\n";
-  }
+//  int ntot = current_node->GetN() - 1;
+//  int ntotafter = ntot + noof_nodes;
 
   int nnewnodes = 0;
-  if (weights_.size() - widx > current_node->GetNumChildren()) {  // there is an unexpanded edge to potentially extend
+
+
+  int npos = current_node->GetN() - 1;;
+  float weightpos = 1.0;
+
+  if (current_node->GetNumChildren() < current_node->GetNumEdges()) {  // there is an unexpanded edge to potentially extend
     int idx = current_node->GetNumChildren();
-    double w = (double)weights_[widx + idx];
-    int ai = round((double)(npos + noof_nodes) * w / (w + weightpos));
-    if (ai >= 1) {
-
-      if (DEBUG) std::cerr << "Creating child\n";
-
+    if (round(weights_[widx + idx] * (float)(npos + noof_nodes)) >= 1) {
       (current_node->GetEdges())[idx].CreateChild(current_node, idx);
       nnewnodes++;
       Node_revamp* newchild = (current_node->GetEdges())[idx].GetChild();
@@ -565,32 +611,147 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
 
         if (DEBUG) std::cerr << "Adding child to batch\n";
 
-        noof_nodes--;  // could alternatively be noof_nodes -= ai but that would mean more frequent under full batches
+        noof_nodes--;
       } else {
-      	LOGFILE << "Got a terminal node! \n";
-	std::cerr << "Got a terminal node. Will segfault! \n";	
+        std::cerr << "Terminal node created\n";	
       }
       history_.Pop();
     }
-    weights_.pop_back();
+    weightpos -= weights_[widx + idx];
+    nw--;
+//    weights_.pop_back();
   }
+
+  if (noof_nodes > 0) {
+
+  for (;;) {
+    int minidx = -1;
+    float minval = 0.0;
+    int count_pos = nw;
+    for (unsigned int i = 0; i < nw; i++) {
+      float w = weights_[widx + i];
+      if (w > -0.5) {
+        float def = w / weightpos * (float)(npos + noof_nodes) - (float)current_node->GetEdges()[i].GetChild()->GetN();
+        if (def < 0.0 && def < minval) {
+          minval = def;
+          minidx = i;
+        }
+      }
+    }
+    if (minidx != -1) {
+      weightpos -= weights_[widx + minidx];
+      npos -= current_node->GetEdges()[minidx].GetChild()->GetN();
+      weights_[widx + minidx] = -1.0;
+      count_pos--;
+      if (count_pos <= 0) {
+        std::cerr << "count_pos: " << count_pos << ", noof_nodes: " << noof_nodes << "\n";
+      }
+    } else {
+      break;
+    }
+  }
+
+  //~ for (int i = 0; i < current_node->GetNumChildren(); i++) {
+    //~ int n = (current_node->GetEdges())[i].GetChild()->GetN();
+    //~ if ((double)ntotafter * (double)weights_[widx + i] - (double)n > 0.0) {
+      //~ npos += n;
+      //~ weightpos += (double)weights_[widx + i];
+    //~ } else {
+      //~ weights_[widx + i] = 0.0;
+    //~ }
+  //~ }
+
+  //~ if (DEBUG) {
+    //~ std::cerr << "q: " << noof_nodes << ", n: " << current_node->GetN() << ", nedge: " << current_node->GetNumEdges() << ", nchild: " << current_node->GetNumChildren() << "\n";
+    //~ for (int i = widx; i < (int)weights_.size(); i++) {
+      //~ std::cerr << " " << weights_[i];
+    //~ }
+    //~ std::cerr << "\n";
+    //~ for (int i = 0; i < current_node->GetNumChildren(); i++) {
+      //~ std::cerr << " " << (current_node->GetEdges())[i].GetChild()->GetN();
+    //~ }
+    //~ std::cerr << "\n";
+  //~ }
+
+  //~ if (weights_.size() - widx > current_node->GetNumChildren()) {  // there is an unexpanded edge to potentially extend
+    //~ int idx = current_node->GetNumChildren();
+    //~ double w = (double)weights_[widx + idx];
+    //~ int ai = round((double)(npos + noof_nodes) * w / (w + weightpos));
+    //~ if (ai >= 1) {
+
+      //~ if (DEBUG) std::cerr << "Creating child\n";
+
+      //~ (current_node->GetEdges())[idx].CreateChild(current_node, idx);
+      //~ nnewnodes++;
+      //~ Node_revamp* newchild = (current_node->GetEdges())[idx].GetChild();
+      //~ history_.Append((current_node->GetEdges())[idx].GetMove());
+      //~ newchild->ExtendNode(&history_);
+      //~ if (!newchild->IsTerminal()) {
+        //~ AddNodeToComputation2();
+        //~ minibatch_.push_back(newchild);
+
+        //~ if (DEBUG) std::cerr << "Adding child to batch\n";
+
+        //~ noof_nodes--;  // could alternatively be noof_nodes -= ai but that would mean more frequent under full batches
+      //~ } else {
+      	//~ LOGFILE << "Got a terminal node! \n";
+	//~ std::cerr << "Got a terminal node. Will segfault! \n";	
+      //~ }
+      //~ history_.Pop();
+    //~ }
+    //~ weights_.pop_back();
+  //~ }
   
-  if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
+  //~ if (DEBUG) std::cerr << "weights_.size(): " << (weights_.size() - widx) << "\n";
+
+/*  
+  for (int i = 0; i < nw; i++) {
+    float w = weights_[widx + i];
+    if (w > -0.5) {
+      int n = (current_node->GetEdges())[i].GetChild()->GetN();
+      float ai = (double)(npos + noof_nodes) * w / weightpos - (double)n;
+      weights_[widx + i] = ai;
+      qqs += ai;
+    }
+  }
+*/
   
-  for (int i = 0; i < (int)weights_.size() - (int)widx; i++) {
-    double w = (double)weights_[widx + i];
-    if (w > 0.0) {
+  for (int i = 0; i < nw; i++) {
+    float ssw = 0.0;
+    int ssnp = 0;
+    for (int j = i; j < nw; j++) {
+      float w = weights_[widx + j];
+      if (w > -0.5) {
+        ssw += w;
+        ssnp += (current_node->GetEdges())[j].GetChild()->GetN();
+      }
+    }
+    if (abs(ssw - weightpos) > 1e-5) {
+      std::cerr << "ssw: " << ssw << ", weightpos: " << weightpos << "\n";
+    }
+    if (ssnp != npos) {
+      std::cerr << "ssnp: " << ssnp << ", npos: " << npos << "\n";
+    }
+
+    float w = weights_[widx + i];
+    if (w > -0.5) {
       int n = (current_node->GetEdges())[i].GetChild()->GetN();
       int ai = round((double)(npos + noof_nodes) * w / weightpos - (double)n);
 
       if (DEBUG) std::cerr << "Child " << i << ", ai: " << ai << "\n";
       
-      //~ if (ai < 0) {
-        //~ std::cerr << "ai: " << ai << "\n";
-      //~ }
+      if (ai < 0) {
+        std::cerr << "ai: " << ai << "\n";
+      }
 
+      if (ai > noof_nodes) {
+        std::cerr << "ai > noof_nodes, ai: " << ai << ", noof_nodes: " << noof_nodes << "\n";
+        std::cerr << "ssw: " << ssw << ", weightpos: " << weightpos << "\n";
+        std::cerr << "ssnp: " << ssnp << ", npos: " << npos << "\n";
+        std::cerr << "n: " << n << ", w: " << w << "\n";
+        ai = noof_nodes;
+      }
       if (ai >= 1) {
-        if (ai > noof_nodes) ai = noof_nodes;
 
         history_.Append((current_node->GetEdges())[i].GetMove());
 
@@ -611,15 +772,24 @@ int SearchWorker_revamp::pickNodesToExtend(Node_revamp* current_node, int noof_n
   // noof_nodes unchanged if sub tree is exhausted (node has no edges (terminal) or all unexpanded descendants are terminal)
   // noof_nodes > 0 if not enough nodes were added to children or no children and new child is terminal
 
+  if (abs(weightpos) > 1e-5 || npos != 0) {
+    std::cerr << "weightpos: " << weightpos << "\n";
+    std::cerr << "npos: " << npos << "\n";
+  }
+
+  if (noof_nodes != 0 && nw > 0) {
+    std::cerr << "noof_nodes = " << noof_nodes << "\n";
+  }
+
+}
+
+
   for (int n = weights_.size() - widx; n > 0; n--) {
     weights_.pop_back();
   }
 
-  if ((int)weights_.size() != (int)widx) {
-    std::cerr << "weights_.size() != widx\n";
-  }
-
   current_node->IncreaseN(nnewnodes);
+
 
   if (nnewnodes > orig_noof_nodes) {
     std::cerr << "new nodes: " << nnewnodes << ", should be: " << orig_noof_nodes << "\n";
@@ -748,7 +918,11 @@ void SearchWorker_revamp::RunBlocking2() {
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
     totp += (worker_root_->GetEdges())[i].GetP();
   }
-  std::cerr << "move   P          norm P     n          norm n     h    Q\n";
+
+  computeWeights(worker_root_, 0); // full_tree_depth is an alternative
+  //computeWeights2(worker_root_);
+
+  std::cerr << "move   P          norm P            n   norm n      h   Q          w\n";
   for (int i = 0; i < worker_root_->GetNumChildren(); i++) {
     std::cerr << std::fixed
               << (worker_root_->GetEdges())[i].GetMove().as_string() << " "
@@ -757,9 +931,12 @@ void SearchWorker_revamp::RunBlocking2() {
               << std::setw(10) << (worker_root_->GetEdges())[i].GetChild()->GetN() << " "
               << std::setw(10) << (float)(worker_root_->GetEdges())[i].GetChild()->GetN() / (float)(worker_root_->GetN() - 1) << " "
               << std::setw(4) << (worker_root_->GetEdges())[i].GetChild()->ComputeHeight() << " "
-              << std::setw(10) << (float)(worker_root_->GetEdges())[i].GetChild()->GetQ()
+              << std::setw(10) << (float)(worker_root_->GetEdges())[i].GetChild()->GetQ() << " "
+              << std::setw(10) << weights_[i]
               << "\n";
   }
+  
+  weights_.clear();
 }
 
 void SearchWorker_revamp::AddNodeToComputation(Node_revamp* node) {
